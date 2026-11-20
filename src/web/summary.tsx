@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { Entry } from '../domain/model.ts';
 import { money } from './client.ts';
 
@@ -17,26 +18,42 @@ export interface ServiceSummary {
     situacao: string;
 }
 
-function Amounts({ values }: { values: [string, number][] }) {
-    return <dl className="amounts">{values.map(([label, value]) =>
-        <div key={label}><dt>{label}</dt><dd>{money.format(value / 100)}</dd></div>)}</dl>;
+function Amounts({ values }: { values: [string, number, boolean?][] }) {
+    return <dl className="amounts">{values.map(([label, value, primary]) =>
+        <div key={label} className={primary ? 'amount-primary' : undefined}>
+            <dt>{label}</dt><dd>{money.format(value / 100)}</dd>
+        </div>)}</dl>;
+}
+
+export function dateLabel(date: string) {
+    const [year, month, day] = date.split('-');
+    return `${day}/${month}/${year}`;
 }
 
 export function MonthlyReport({ summary }: { summary: MonthSummary }) {
+    const entries = [...summary.recebimentos, ...summary.despesas].sort((first, second) =>
+        (second.pagamento ?? second.data).localeCompare(first.pagamento ?? first.data) || second.id - first.id);
     return <>
-        <Amounts values={[['Entradas', summary.entradas], ['Despesas pagas', summary.saidas], ['Resultado de caixa', summary.resultado]]} />
+        <Amounts values={[['Resultado de caixa', summary.resultado, true], ['Entradas', summary.entradas], ['Despesas pagas', summary.saidas]]} />
         <h3>Lançamentos do mês</h3>
-        {summary.recebimentos.length + summary.despesas.length === 0 ? <p>Nenhum lançamento neste mês.</p> :
-            <ul>{[...summary.recebimentos, ...summary.despesas].map(entry =>
-                <li key={entry.id}>{entry.pagamento ? 'Saída' : 'Entrada'} · {entry.pagamento ?? entry.data} · {entry.descricao} · {money.format(entry.valor / 100)}</li>
-            )}</ul>}
+        {entries.length === 0 ? <p className="empty">Nenhum lançamento neste mês.</p> :
+            <ul className="entries" role="list">{entries.map(entry => {
+                const date = entry.pagamento ?? entry.data;
+                return <li className="transaction" key={entry.id}>
+                    <div><strong>{entry.descricao}</strong>
+                        <div className="muted">{entry.pagamento ? 'Saída' : 'Entrada'} · <time dateTime={date}>{dateLabel(date)}</time></div>
+                    </div>
+                    <span className="transaction-value">{entry.pagamento ? '−' : '+'}{money.format(entry.valor / 100)}</span>
+                </li>;
+            })}</ul>}
     </>;
 }
 
-export function ServiceReport({ summary }: { summary: ServiceSummary }) {
-    return <section>
-        <h3>Situação do serviço · {summary.situacao}</h3>
-        <Amounts values={[['Recebido', summary.recebido], ['Saldo a receber', summary.saldo],
+export function ServiceReport({ summary, description }: { summary: ServiceSummary; description: string }) {
+    const headingId = useId();
+    return <section className="service-report" aria-labelledby={headingId}>
+        <h3 id={headingId}>Situação de {description} · {summary.situacao}</h3>
+        <Amounts values={[['Saldo a receber', summary.saldo, true], ['Recebido', summary.recebido],
             ['Custo direto', summary.custoDireto], ['Diferença após custos diretos', summary.diferenca]]} />
     </section>;
 }
