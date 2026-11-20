@@ -1,16 +1,31 @@
-import { DomainError } from './model.ts';
+import { DomainError, serviceTotal } from './model.ts';
 import type { Entry, Kind, Repository } from './model.ts';
 import { parseDraft } from './validation.ts';
 
 export class Ledger {
     private repository: Repository;
+    private today: () => string;
 
-    constructor(repository: Repository) {
+    constructor(repository: Repository, today = () =>
+        new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date())) {
         this.repository = repository;
+        this.today = today;
     }
 
     list(kind: Kind) {
-        return this.repository.list(kind);
+        if (kind === 'despesas') this.repository.syncRecurringExpenses(this.today());
+        const entries = this.repository.list(kind);
+        if (kind !== 'servicos') return entries;
+        const linkedExpenses = new Map<number, Entry[]>();
+        for (const expense of this.list('despesas')) {
+            if (expense.cancelado || expense.servico === null) continue;
+            const expenses = linkedExpenses.get(expense.servico) ?? [];
+            expenses.push(expense);
+            linkedExpenses.set(expense.servico, expenses);
+        }
+        return entries.map(entry => ({
+            ...entry, custoDireto: entry.custoMaterial ?? total(linkedExpenses.get(entry.id) ?? [])
+        }));
     }
 
     get(kind: Kind, id: number) {
@@ -26,29 +41,47 @@ export class Ledger {
     save(kind: Kind, body: unknown, id?: number) {
         const draft = parseDraft(kind, body);
         return this.repository.transaction(() => {
-            if (id !== undefined && this.get(kind, id).cancelado) {
+            const existing = id === undefined ? undefined : this.get(kind, id);
+            if (existing?.cancelado) {
                 throw new DomainError('O lançamento está cancelado.', 409);
+            }
+            if (kind === 'despesas' && existing) {
+                if (existing.recorrenciaOrigem && (draft.recorrente || draft.data !== existing.data)) {
+                    throw new DomainError('A data e a recorrência de uma cobrança gerada são fixas.');
+                }
+                if (existing.recorrente && draft.data !== existing.data) {
+                    throw new DomainError('Encerre a recorrência e cadastre outra para alterar o dia de cobrança.');
+                }
+                if (existing.recorrente) this.repository.syncRecurringExpenses(this.today());
+                draft.recorrente ??= existing.recorrente;
             }
             if (draft.servico !== null) {
                 const service = this.get('servicos', draft.servico);
                 if (service.cancelado) throw new DomainError('O serviço está cancelado.', 409);
                 if (kind === 'recebimentos') {
                     const other = this.linked('recebimentos', service.id).filter(entry => entry.id !== id);
-                    if (draft.valor > service.valor - total(other)) {
+                    if (draft.valor > serviceTotal(service) - total(other)) {
                         throw new DomainError('O recebimento excede o saldo do serviço.', 409);
                     }
                 }
             }
-            if (kind === 'servicos' && id !== undefined && draft.valor < total(this.linked('recebimentos', id))) {
-                throw new DomainError('O valor acordado é inferior ao valor recebido.', 409);
+            if (kind === 'servicos') {
+                if (draft.custoMaterial === undefined) draft.custoMaterial = existing?.custoMaterial;
+                const agreedTotal = serviceTotal(draft);
+                if (!Number.isSafeInteger(agreedTotal)) throw new DomainError('O total do serviço excede o limite de cálculo.');
+                if (id !== undefined && agreedTotal < total(this.linked('recebimentos', id))) {
+                    throw new DomainError('O valor acordado é inferior ao valor recebido.', 409);
+                }
             }
-            return id === undefined ? this.repository.create(kind, draft) : this.repository.update(kind, id, draft);
+            return id === undefined ? this.repository.create(kind, draft) : this.repository.update(kind, id, draft, this.today());
         });
     }
 
     cancel(kind: Kind, id: number) {
         this.repository.transaction(() => {
-            if (this.get(kind, id).cancelado) return;
+            const entry = this.get(kind, id);
+            if (entry.cancelado) return;
+            if (entry.recorrente) this.repository.syncRecurringExpenses(this.today());
             if (kind === 'servicos' && (this.linked('despesas', id).length || this.linked('recebimentos', id).length)) {
                 throw new DomainError('O serviço ainda tem lançamentos ativos.', 409);
             }
@@ -59,10 +92,11 @@ export class Ledger {
     serviceSummary(id: number) {
         const service = this.get('servicos', id);
         const recebido = total(this.linked('recebimentos', id));
-        const custoDireto = total(this.linked('despesas', id));
-        const saldo = service.valor - recebido;
+        const custoDireto = service.custoMaterial ?? total(this.linked('despesas', id));
+        const agreedTotal = serviceTotal(service);
+        const saldo = agreedTotal - recebido;
         const situacao = service.cancelado ? 'Cancelado' : saldo === 0 ? 'Quitado' : recebido ? 'Parcial' : 'Em aberto';
-        return { recebido, saldo, custoDireto, diferenca: service.valor - custoDireto, situacao };
+        return { recebido, saldo, custoDireto, diferenca: agreedTotal - custoDireto, situacao };
     }
 
     monthlySummary(month: string) {

@@ -36,6 +36,15 @@ export function parseDraft(kind: Kind, value: unknown): Draft {
     if (detalhe.length > 120 || (kind === 'despesas' && !detalhe)) {
         throw new DomainError('Informe uma categoria válida para a despesa ou um cliente de até 120 caracteres.');
     }
-    return { descricao, detalhe: kind === 'recebimentos' ? null : detalhe || null, valor: body.valor, data: date(body.data), servico, pagamento };
+    if (body.recorrente !== undefined && (kind !== 'despesas' || typeof body.recorrente !== 'boolean')) {
+        throw new DomainError('A recorrência mensal é válida apenas para despesas.');
+    }
+    const custoMaterial = body.custoMaterial;
+    if (custoMaterial !== undefined && (kind !== 'servicos' || (custoMaterial !== null &&
+        (typeof custoMaterial !== 'number' || !Number.isSafeInteger(custoMaterial) || custoMaterial < 0)))) {
+        throw new DomainError('Informe um custo de materiais válido em centavos.');
+    }
+    return { descricao, detalhe: kind === 'recebimentos' ? null : detalhe || null, valor: body.valor, data: date(body.data),
+        servico, pagamento, recorrente: body.recorrente as boolean | undefined, custoMaterial };
 }
 

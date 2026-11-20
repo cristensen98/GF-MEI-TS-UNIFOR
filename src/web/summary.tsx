@@ -1,6 +1,8 @@
-import { useId } from 'react';
+import { useState } from 'react';
 import type { Entry } from '../domain/model.ts';
 import { money } from './client.ts';
+import { Modal } from './modal.tsx';
+import { MonthlyInsights } from './monthly-insights.tsx';
 
 export interface MonthSummary {
     entradas: number;
@@ -30,13 +32,72 @@ export function dateLabel(date: string) {
     return `${day}/${month}/${year}`;
 }
 
-export function MonthlyReport({ summary }: { summary: MonthSummary }) {
-    const entries = [...summary.recebimentos, ...summary.despesas].sort((first, second) =>
-        (second.pagamento ?? second.data).localeCompare(first.pagamento ?? first.data) || second.id - first.id);
-    return <>
-        <Amounts values={[['Resultado de caixa', summary.resultado, true], ['Entradas', summary.entradas], ['Despesas pagas', summary.saidas]]} />
-        <h3>Lançamentos do mês</h3>
-        {entries.length === 0 ? <p className="empty">Nenhum lançamento neste mês.</p> :
+function CashCharts({ summary, month }: { summary: MonthSummary; month: string }) {
+    const endOfMonth = new Date(`${month}-01T00:00:00Z`);
+    endOfMonth.setUTCMonth(endOfMonth.getUTCMonth() + 1, 0);
+    const lastDay = endOfMonth.getUTCDate();
+    const periods = Array.from({ length: Math.ceil(lastDay / 7) }, (_, index) => ({
+        label: `${index * 7 + 1}–${Math.min((index + 1) * 7, lastDay)}`, income: 0, expenses: 0
+    }));
+    for (const entry of summary.recebimentos) {
+        periods[Math.floor((Number(entry.data.slice(-2)) - 1) / 7)].income += entry.valor;
+    }
+    const categories = new Map<string, number>();
+    for (const entry of summary.despesas) {
+        if (!entry.pagamento) continue;
+        periods[Math.floor((Number(entry.pagamento.slice(-2)) - 1) / 7)].expenses += entry.valor;
+        const category = entry.detalhe || 'Sem categoria';
+        categories.set(category, (categories.get(category) ?? 0) + entry.valor);
+    }
+    const scale = Math.max(1, ...periods.flatMap(period => [period.income, period.expenses]));
+    const sorted = [...categories].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'pt-BR'));
+    return <div className="dashboard-charts">
+        <section className="dashboard-panel" aria-labelledby="cash-heading">
+            <h3 id="cash-heading">Fluxo de caixa</h3>
+            <p className="muted">Entradas e despesas pagas por período</p>
+            {summary.entradas || summary.saidas ? <>
+                <div className="chart-legend"><span>Entradas</span><span>Despesas pagas</span></div>
+                <div className="cash-chart" aria-hidden="true">
+                    <div className="chart-scale">
+                        <span>{money.format(scale / 100)}</span><span>{money.format(0)}</span>
+                    </div>
+                    {periods.map(period => <div key={period.label}>
+                        <div className="bar-group">
+                            <span style={{ height: `${period.income / scale * 100}%` }} />
+                            <span style={{ height: `${period.expenses / scale * 100}%` }} />
+                        </div>
+                        <span>{period.label}</span>
+                    </div>)}
+                </div>
+                <details><summary>Ver valores por período</summary>
+                    <table className="chart-table">
+                        <caption>Fluxo de caixa por dias do mês</caption>
+                        <thead><tr><th scope="col">Dias</th><th scope="col">Entradas</th><th scope="col">Despesas</th></tr></thead>
+                        <tbody>{periods.map(period => <tr key={period.label}>
+                            <th scope="row">{period.label}</th><td>{money.format(period.income / 100)}</td>
+                            <td>{money.format(period.expenses / 100)}</td>
+                        </tr>)}</tbody>
+                    </table>
+                </details>
+            </> : <p className="chart-empty">Nenhuma movimentação de caixa neste mês.</p>}
+        </section>
+        <section className="dashboard-panel" aria-labelledby="categories-heading">
+            <h3 id="categories-heading">Despesas por categoria</h3>
+            <p className="muted">Participação no total pago</p>
+            {sorted.length ? <ul className="category-chart" role="list">{sorted.map(([category, value]) => {
+                const share = value / summary.saidas;
+                return <li key={category}>
+                    <div><strong>{category}</strong><span>{money.format(value / 100)}</span></div>
+                    <div><span className="category-track" aria-hidden="true"><span style={{ width: `${share * 100}%` }} /></span>
+                        <span>{new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(share)}</span></div>
+                </li>;
+            })}</ul> : <p className="chart-empty">Nenhuma despesa paga neste mês.</p>}
+        </section>
+    </div>;
+}
+
+function Transactions({ entries, empty }: { entries: Entry[]; empty: string }) {
+    return entries.length === 0 ? <p className="empty">{empty}</p> :
             <ul className="entries" role="list">{entries.map(entry => {
                 const date = entry.pagamento ?? entry.data;
                 return <li className="transaction" key={entry.id}>
@@ -45,16 +106,50 @@ export function MonthlyReport({ summary }: { summary: MonthSummary }) {
                     </div>
                     <span className="transaction-value">{entry.pagamento ? '−' : '+'}{money.format(entry.valor / 100)}</span>
                 </li>;
-            })}</ul>}
+            })}</ul>;
+}
+
+export function MonthlyReport({ summary, month }: { summary: MonthSummary; month: string }) {
+    const [selection, setSelection] = useState<{ key: 'resultado' | 'entradas' | 'saidas'; trigger: HTMLButtonElement } | null>(null);
+    const entries = [...summary.recebimentos, ...summary.despesas].sort((first, second) =>
+        (second.pagamento ?? second.data).localeCompare(first.pagamento ?? first.data) || second.id - first.id);
+    const indicators = {
+        resultado: { label: 'Resultado de caixa', entries, empty: 'Nenhum lançamento neste mês.' },
+        entradas: { label: 'Entradas', entries: entries.filter(entry => !entry.pagamento), empty: 'Nenhum recebimento neste mês.' },
+        saidas: { label: 'Despesas pagas', entries: entries.filter(entry => entry.pagamento), empty: 'Nenhuma despesa paga neste mês.' }
+    };
+    const indicator = selection && indicators[selection.key];
+    return <>
+        <div className="amounts dashboard-indicators">
+            {(['resultado', 'entradas', 'saidas'] as const).map(key =>
+                <button key={key} type="button" className={key === 'resultado' ? 'amount-primary' : undefined}
+                    aria-haspopup="dialog" onClick={event => setSelection({ key, trigger: event.currentTarget })}>
+                    <span>{indicators[key].label}</span>
+                    <strong>{money.format(summary[key] / 100)}</strong>
+                    <span className="indicator-action">Ver detalhes <span aria-hidden="true">↗</span></span>
+                </button>)}
+        </div>
+        <MonthlyInsights key={month} month={month} summary={summary} />
+        <CashCharts summary={summary} month={month} />
+        <section className="dashboard-panel" aria-labelledby="transactions-heading">
+            <h3 id="transactions-heading">Lançamentos do mês</h3>
+            <Transactions entries={entries} empty="Nenhum lançamento neste mês." />
+        </section>
+        {selection && indicator && <Modal title={indicator.label} trigger={selection.trigger} close={() => setSelection(null)}>
+            <p className="muted">Referência: {month.slice(5)}/{month.slice(0, 4)}</p>
+            <p className="modal-total">{money.format(summary[selection.key] / 100)}</p>
+            {selection.key === 'resultado' && <Amounts values={[[ 'Entradas', summary.entradas], ['Despesas pagas', summary.saidas]]} />}
+            <h3>Lançamentos considerados</h3>
+            <Transactions entries={indicator.entries} empty={indicator.empty} />
+        </Modal>}
     </>;
 }
 
-export function ServiceReport({ summary, description }: { summary: ServiceSummary; description: string }) {
-    const headingId = useId();
-    return <section className="service-report" aria-labelledby={headingId}>
-        <h3 id={headingId}>Situação de {description} · {summary.situacao}</h3>
+export function ServiceReport({ summary }: { summary: ServiceSummary }) {
+    return <div className="service-report">
+        <p>Situação: <strong>{summary.situacao}</strong></p>
         <Amounts values={[['Saldo a receber', summary.saldo, true], ['Recebido', summary.recebido],
             ['Custo direto', summary.custoDireto], ['Diferença após custos diretos', summary.diferenca]]} />
-    </section>;
+    </div>;
 }
 

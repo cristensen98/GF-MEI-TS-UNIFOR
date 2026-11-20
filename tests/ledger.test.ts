@@ -10,11 +10,53 @@ const service = { descricao: 'Serviço', valor: 30000, data: '2026-04-01' };
 const expense = { descricao: 'Material', detalhe: 'Insumos', valor: 8000, data: '2026-04-01' };
 const receipt = { descricao: 'Pagamento parcial', valor: 10000, data: '2026-04-02' };
 
-function fixture(t: { after: (cleanup: () => void) => void }) {
+function fixture(t: { after: (cleanup: () => void) => void }, today?: () => string) {
     const database = new SqliteRepository(':memory:');
     t.after(() => database.close());
-    return new Ledger(database);
+    return new Ledger(database, today);
 }
+
+test('gera despesas mensais uma vez, ajusta o vencimento e contabiliza somente o pagamento', t => {
+    let today = '2026-03-30';
+    const ledger = fixture(t, () => today);
+    const draft = { ...expense, data: '2026-01-31', recorrente: true };
+    const original = ledger.save('despesas', { ...draft, pagamento: '2026-01-31' });
+    const [february] = ledger.list('despesas');
+    assert.equal(february.data, '2026-02-28');
+    assert.equal(february.recorrenciaOrigem, original.id);
+    assert.equal(february.pagamento, null);
+    assert.equal(ledger.list('despesas').length, 2);
+    assert.equal(ledger.monthlySummary('2026-02').saidas, 0);
+    ledger.save('despesas', { ...expense, data: february.data, pagamento: '2026-03-02' }, february.id);
+    assert.equal(ledger.monthlySummary('2026-03').saidas, expense.valor);
+    today = '2026-03-31';
+    assert.equal(ledger.list('despesas')[0].data, '2026-03-31');
+    ledger.save('despesas', { ...draft, recorrente: false, pagamento: '2026-01-31' }, original.id);
+    today = '2026-04-30';
+    assert.equal(ledger.list('despesas').length, 3);
+    assert.equal(ledger.monthlySummary('2026-01').saidas, expense.valor);
+});
+
+test('usa materiais como custo direto sem duplicar despesas vinculadas', t => {
+    const ledger = fixture(t);
+    const entry = ledger.save('servicos', { ...service, custoMaterial: 4250 });
+    assert.equal(ledger.get('servicos', entry.id).custoMaterial, 4250);
+    assert.equal(ledger.save('servicos', service, entry.id).custoMaterial, 4250);
+    assert.equal(ledger.serviceSummary(entry.id).saldo, service.valor + 4250);
+    ledger.save('despesas', { ...expense, servico: entry.id });
+    assert.equal(ledger.serviceSummary(entry.id).custoDireto, 4250);
+    assert.equal(ledger.list('servicos')[0].custoDireto, 4250);
+    assert.equal(ledger.serviceSummary(entry.id).diferenca, service.valor);
+    assert.equal(ledger.monthlySummary('2026-04').saidas, 0);
+    assert.throws(() => ledger.save('servicos', { ...service, custoMaterial: -1 }), /custo de materiais válido/);
+    assert.equal(ledger.save('servicos', { ...service, custoMaterial: null }, entry.id).custoMaterial, undefined);
+    assert.equal(ledger.list('servicos')[0].custoDireto, expense.valor);
+    ledger.save('servicos', { ...service, custoMaterial: 4250 }, entry.id);
+    ledger.save('recebimentos', { ...receipt, valor: service.valor + 4250, servico: entry.id });
+    assert.equal(ledger.serviceSummary(entry.id).situacao, 'Quitado');
+    assert.equal(ledger.monthlySummary('2026-04').entradas, service.valor + 4250);
+    assert.throws(() => ledger.save('servicos', { ...service, custoMaterial: null }, entry.id), /inferior ao valor recebido/);
+});
 
 test('valida lançamentos, consulta e atualiza serviços', t => {
     const ledger = fixture(t);

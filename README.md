@@ -9,6 +9,14 @@ Com Node.js 24 e npm instalados, execute na raiz:
 ```sh
 npm install
 npm run build
+```
+
+Antes de iniciar, configure as variáveis no mesmo terminal. Exemplo em PowerShell:
+
+```powershell
+$env:GFMEI_USER = 'administrador'
+$env:GFMEI_PASSWORD = Read-Host 'Senha do GF-MEI (mínimo de 12 caracteres)' -MaskInput
+$env:GFMEI_JWT_SECRET = node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('hex'))"
 npm start
 ```
 
@@ -33,5 +41,7 @@ Execute `npm test`. Os testes usam o executor nativo do Node.js e o SQLite em me
 
 ## Limites desta versão
 
-O servidor escuta apenas no endereço local e o protótipo pressupõe um único usuário. Autenticação, isolamento entre negócios e filtros detalhados dos cadastros permanecem pendentes. Use dados fictícios até implementar o controle de acesso.
+O servidor escuta apenas no endereço local. A conta configurada no ambiente é a administradora. Na tela de login, **Criar conta** solicita usuário e senha. Na seção **Usuários**, o administrador aprova contas pendentes ou cria usuários com acesso imediato. As contas aprovadas acessam os mesmos lançamentos financeiros.
+
+O JWT fica em um cookie HttpOnly com validade de oito horas. Sair revoga a sessão no servidor. Reiniciar o servidor encerra todas as sessões. Para acesso remoto, são necessários HTTPS e uma configuração própria de produção.
 
