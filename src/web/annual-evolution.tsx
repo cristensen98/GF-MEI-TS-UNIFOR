@@ -60,11 +60,12 @@ function EvolutionChart({ months, selected, series, revenue }: {
     </>;
 }
 
-export function AnnualEvolution({ months, cash, services, cashError, revenueError }: {
+export function AnnualEvolution({ months, referenceIndex, cash, services, cashError, revenueError }: {
+    referenceIndex: number;
     months: string[]; cash: MonthSummary[] | null; services: Entry[] | null;
     cashError: boolean; revenueError: boolean;
 }) {
-    const [selected, setSelected] = useState(months.length - 1);
+    const [selected, setSelected] = useState(referenceIndex);
     const [fiscal, setFiscal] = useState(true);
     const revenue = services && recordedRevenue(months, services);
     const selectedRevenue = revenue?.[selected];
@@ -76,7 +77,7 @@ export function AnnualEvolution({ months, cash, services, cashError, revenueErro
 
     return <section className="dashboard-panel evolution" aria-labelledby="annual-evolution-title">
         <h3 id="annual-evolution-title">Evolução anual</h3>
-        <p className="muted">{months.length} meses até {label(months[months.length - 1])}</p>
+        <p className="muted">Janeiro a dezembro de {months[0].slice(0, 4)}</p>
         <div className="annual-controls">
             <div className="actions" role="group" aria-label="Dados do gráfico">
                 <button type="button" aria-pressed={fiscal} onClick={() => setFiscal(true)}>Faturamento e limite MEI</button>
@@ -107,7 +108,7 @@ export function AnnualEvolution({ months, cash, services, cashError, revenueErro
                 <div key={item.label}><dt>{item.label}</dt><dd>{formatMoney(item.values[selected])}</dd></div>)}</dl>}
             <details><summary>Ver valores dos {months.length} meses</summary>
                 <div className="table-scroll" role="region" aria-label="Valores da evolução anual" tabIndex={0}>
-                    <table className="chart-table">
+                    <table className="chart-table annual-values-table">
                         <caption>{fiscal ? 'Faturamento registrado e faixa de referência' : 'Fluxo de caixa mensal'}</caption>
                         <thead><tr><th scope="col">Mês</th>{fiscal
                             ? <><th scope="col">No mês</th><th scope="col">Acumulado no ano</th><th scope="col">Faixa de referência</th></>

@@ -117,7 +117,7 @@ fieldset > p:empty { position: absolute; }
 .site-header nav button:hover:not([aria-disabled="true"]) { background: #284460; }
 .site-header nav button[aria-current="page"] { background: #254860; border-inline-start: 3px solid #a4f0d6; }
 .site-header :focus-visible { outline-color: #a4f0d6; }
-main.shell { min-width: 0; max-width: 82rem; }
+main.shell { min-width: 0; }
 .section-heading { margin-bottom: 1.35rem; }
 .amounts > div, .dashboard-panel { box-shadow: 0 3px 12px #12283a0a; }
 .amounts .amount-primary { background: #116451; }
@@ -225,11 +225,14 @@ main.shell { min-width: 0; max-width: 82rem; }
 .annual-legend .chart-guide { border-top-style: dashed; }
 .annual-legend .chart-guide-dotted { border-top-style: dotted; }
 .annual-plot { min-width: 0; color: var(--muted); }
+.annual-values-table caption, .annual-values-table th, .annual-values-table td {
+    padding-inline: clamp(.625rem, 1.75vw, 1.125rem);
+}
 .revenue-alert { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .75rem; border: 1px solid var(--border); background: #f3f6fa; border-radius: .55rem; padding: .75rem; }
 .revenue-alert p { flex-basis: 100%; }
 .revenue-rules { margin-block: .55rem; }
-.revenue-rules dt { font-weight: 700; }
-.revenue-rules dd { margin: 0 0 .55rem; }
+.revenue-rules dt { font-size: 1.125rem; font-weight: 700; }
+.revenue-rules dd { margin: .15rem 0 .85rem; font-size: 1rem; font-weight: 400; }
 @media (max-width: 36rem) {
     .annual-legend { font-size: .8125rem; }
     .evolution-chart { grid-template-columns: 1fr; }
@@ -249,8 +252,9 @@ main.shell { min-width: 0; max-width: 82rem; }
 }
 
 .workspace { min-width: 0; }
+.workspace .shell { width: 100%; padding-inline: clamp(.75rem, 1.5vw, 1.5rem); }
 .workspace-bar { background: #fff; border-bottom: 1px solid var(--border); }
-.workspace-bar-content { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem 1.5rem; padding-block: .7rem; max-width: 82rem; }
+.workspace-bar-content { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem 1.5rem; padding-block: .7rem; }
 .workspace-search { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .75rem; flex: 1 1 18rem; max-width: 32rem; }
 .workspace-search input { flex: 1 1 12rem; width: auto; }
 .workspace-user { display: flex; align-items: center; gap: .55rem; }

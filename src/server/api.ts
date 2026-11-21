@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { ErrorRequestHandler } from 'express';
+import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { DomainError, kinds } from '../domain/model.ts';
 import type { Ledger } from '../domain/ledger.ts';
 
@@ -22,13 +22,17 @@ export function api(ledger: Ledger) {
     router.get('/servicos/:id/resumo', (req, res) => {
         res.json(ledger.serviceSummary(parseId(req.params.id)));
     });
+    const requireAdministrator: RequestHandler = (_req, res, next) => {
+        if (res.locals.session?.administrador === true) next();
+        else res.status(403).json({ erro: 'Apenas administradores podem alterar lançamentos.' });
+    };
     for (const kind of kinds) {
         const resource = '/' + kind;
         router.get(resource, (_req, res) => { res.json(ledger.list(kind)); });
         router.get(resource + '/:id', (req, res) => { res.json(ledger.get(kind, parseId(req.params.id))); });
-        router.post(resource, (req, res) => { res.status(201).json(ledger.save(kind, req.body)); });
-        router.put(resource + '/:id', (req, res) => { res.json(ledger.save(kind, req.body, parseId(req.params.id))); });
-        router.delete(resource + '/:id', (req, res) => {
+        router.post(resource, requireAdministrator, (req, res) => { res.status(201).json(ledger.save(kind, req.body)); });
+        router.put(resource + '/:id', requireAdministrator, (req, res) => { res.json(ledger.save(kind, req.body, parseId(req.params.id))); });
+        router.delete(resource + '/:id', requireAdministrator, (req, res) => {
             ledger.cancel(kind, parseId(req.params.id));
             res.sendStatus(204);
         });

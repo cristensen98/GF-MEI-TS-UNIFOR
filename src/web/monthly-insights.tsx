@@ -8,10 +8,8 @@ import { AnnualEvolution } from './annual-evolution.tsx';
 const percent = new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 });
 const palette = ['#087565', '#6746a4', '#195e89', '#a04d1b', '#85405e'];
 
-function monthsBefore(month: string, count: number) {
-    const date = new Date(month + '-01T00:00:00Z');
-    date.setUTCMonth(date.getUTCMonth() - count);
-    return date.getUTCFullYear() < 0 ? '' : date.toISOString().slice(0, 7);
+function monthsOfYear(month: string) {
+    return Array.from({ length: 12 }, (_, index) => month.slice(0, 4) + '-' + String(index + 1).padStart(2, '0'));
 }
 
 function Donut({ title, values }: { title: string; values: [string, number][] }) {
@@ -37,7 +35,8 @@ function Donut({ title, values }: { title: string; values: [string, number][] })
 }
 
 export function MonthlyInsights({ month, summary }: { month: string; summary: MonthSummary }) {
-    const months = Array.from({ length: 12 }, (_, index) => monthsBefore(month, 11 - index)).filter(Boolean);
+    const months = monthsOfYear(month);
+    const referenceIndex = Number(month.slice(5)) - 1;
     const [history, setHistory] = useState<MonthSummary[] | null>(null);
     const [services, setServices] = useState<Entry[] | null>(null);
     const [serviceValues, setServiceValues] = useState<[string, number][] | null>(null);
@@ -47,8 +46,8 @@ export function MonthlyInsights({ month, summary }: { month: string; summary: Mo
 
     useEffect(() => {
         let active = true;
-        const previousMonths = Array.from({ length: 11 }, (_, index) => monthsBefore(month, 11 - index)).filter(Boolean);
-        void Promise.all(previousMonths.map(previous => request<MonthSummary>('resumo/' + previous)))
+        const otherMonths = monthsOfYear(month).filter(item => item !== month);
+        void Promise.all(otherMonths.map(item => request<MonthSummary>('resumo/' + item)))
             .then(results => { if (active) setHistory(results); })
             .catch(() => { if (active) setHistoryError(true); });
         const serviceRequest = request<Entry[]>('servicos');
@@ -74,7 +73,8 @@ export function MonthlyInsights({ month, summary }: { month: string; summary: Mo
         categories.set(name, (categories.get(name) ?? 0) + entry.valor);
     }
     return <div className="monthly-insights">
-        <AnnualEvolution months={months} cash={history && [...history, summary]} services={services}
+        <AnnualEvolution months={months} referenceIndex={referenceIndex}
+            cash={history && [...history.slice(0, referenceIndex), summary, ...history.slice(referenceIndex)]} services={services}
             cashError={historyError} revenueError={revenueError} />
         <div className="dashboard-charts">
             <Donut title="Composição das despesas pagas" values={[...categories].sort((a, b) => b[1] - a[1])} />

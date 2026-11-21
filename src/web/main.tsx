@@ -467,7 +467,7 @@ function Workspace({ usuario, administrador, exit, exiting, sessionError }: {
                         setError('');
                         setLoading(Boolean(event.target.value));
                     }} />
-                </label> : <button ref={newButton} className="primary" disabled={busy}
+                </label> : administrador && <button ref={newButton} className="primary" disabled={busy}
                     aria-haspopup="dialog"
                     onClick={event => {
                         formTrigger.current = event.currentTarget;
@@ -482,7 +482,7 @@ function Workspace({ usuario, administrador, exit, exiting, sessionError }: {
             <p role="status">{notice}</p>
             <p role="status">{loading ? 'Carregando…' : ''}</p>
             {view === 'resumo' ? summary && <MonthlyReport summary={summary} month={month} /> : <>
-                {form && <Modal title={form.entry ? 'Editar ' + form.entry.descricao : newLabels[view]}
+                {administrador && form && <Modal title={form.entry ? 'Editar ' + form.entry.descricao : newLabels[view]}
                     trigger={formTrigger.current} busy={busy} close={closeForm}>
                     <EntryForm kind={view} selected={form.entry} services={services}
                         busy={busy} close={closeForm} save={async draft => {
@@ -516,12 +516,12 @@ function Workspace({ usuario, administrador, exit, exiting, sessionError }: {
                                 <td className="table-number">{formatMoney(entry.custoDireto ?? entry.custoMaterial ?? 0)}</td>
                                 <td className="table-number">{formatMoney(serviceTotal(entry))}</td>
                             </>}
-                        <td>{entry.cancelado ? '—' : <div className="actions">
-                            <ActionButton icon="edit" disabled={busy} label={'Editar ' + entry.descricao} aria-haspopup="dialog"
+                        <td>{view !== 'servicos' && (entry.cancelado || !administrador) ? '—' : <div className="actions">
+                            {administrador && !entry.cancelado && <ActionButton icon="edit" disabled={busy} label={'Editar ' + entry.descricao} aria-haspopup="dialog"
                                 onClick={event => {
                                     formTrigger.current = event.currentTarget;
                                     setForm({ entry });
-                                }} />
+                                }} />}
                             {view === 'servicos' && <ActionButton icon="view" disabled={busy} label={'Ver situação de ' + entry.descricao}
                                 aria-haspopup="dialog" onClick={event => {
                                     detailTrigger.current = event.currentTarget;
@@ -529,7 +529,7 @@ function Workspace({ usuario, administrador, exit, exiting, sessionError }: {
                                     setDetailError('');
                                     setDetailEntry(entry);
                                 }} />}
-                            <ActionButton icon="cancel" disabled={busy} label={'Cancelar lançamento ' + entry.descricao}
+                            {administrador && !entry.cancelado && <ActionButton icon="cancel" disabled={busy} label={'Cancelar lançamento ' + entry.descricao}
                                 onClick={() => {
                                     if (window.confirm('Cancelar o lançamento “' + entry.descricao + '”?')) {
                                         void mutate(view + '/' + entry.id, 'DELETE').then(() => {
@@ -541,7 +541,7 @@ function Workspace({ usuario, administrador, exit, exiting, sessionError }: {
                                                 document.getElementById('cancel-' + entry.id)?.focus());
                                         });
                                     }
-                                }} id={'cancel-' + entry.id} />
+                                }} id={'cancel-' + entry.id} />}
                         </div>}</td>
                     </tr>;
                 })}</DataTable>}
