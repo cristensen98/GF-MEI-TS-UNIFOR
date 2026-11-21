@@ -1,7 +1,11 @@
+import { mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { Ledger } from '../src/domain/ledger.ts';
 import { SqliteRepository } from '../src/server/sqlite.ts';
 
-const database = new SqliteRepository('data/gfmei.sqlite');
+const databasePath = resolve(process.env.GFMEI_DB ?? 'data/gfmei.sqlite');
+mkdirSync(dirname(databasePath), { recursive: true });
+const database = new SqliteRepository(databasePath);
 const ledger = new Ledger(database);
 
 const services = [

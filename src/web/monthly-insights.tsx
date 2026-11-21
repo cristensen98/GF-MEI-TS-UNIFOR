@@ -1,26 +1,17 @@
 import { useEffect, useState } from 'react';
 import type { Entry } from '../domain/model.ts';
 import { serviceTotal } from '../domain/model.ts';
-import { money, request } from './client.ts';
+import { formatMoney, request } from './client.ts';
 import type { MonthSummary } from './summary.tsx';
+import { AnnualEvolution } from './annual-evolution.tsx';
 
-const metrics = [
-    { key: 'entradas', label: 'Entradas', color: '#087565' },
-    { key: 'saidas', label: 'Despesas pagas', color: '#6746a4' },
-    { key: 'resultado', label: 'Resultado de caixa', color: '#193c64' }
-] as const;
-const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 const percent = new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 });
 const palette = ['#087565', '#6746a4', '#195e89', '#a04d1b', '#85405e'];
-
-function label(month: string) {
-    return monthName.format(new Date(month + '-01T00:00:00Z'));
-}
 
 function monthsBefore(month: string, count: number) {
     const date = new Date(month + '-01T00:00:00Z');
     date.setUTCMonth(date.getUTCMonth() - count);
-    return date.toISOString().slice(0, 7);
+    return date.getUTCFullYear() < 0 ? '' : date.toISOString().slice(0, 7);
 }
 
 function Donut({ title, values }: { title: string; values: [string, number][] }) {
@@ -35,30 +26,35 @@ function Donut({ title, values }: { title: string; values: [string, number][] })
         <h3>{title}</h3>
         {total > 0 ? <div className="donut-content">
             <div className="donut" aria-hidden="true" style={{ background: 'conic-gradient(' + stops.join(',') + ')' }}>
-                <strong>{money.format(total / 100)}</strong>
+                <strong>{formatMoney(total)}</strong>
             </div>
             <ul role="list">{values.map(([name, value], index) => <li key={name}>
                 <span className="series-key" aria-hidden="true" style={{ background: palette[index % palette.length] }} />
-                <span>{name}</span><strong>{money.format(value / 100)} · {percent.format(value / total)}</strong>
+                <span>{name}</span><strong>{formatMoney(value)} · {percent.format(value / total)}</strong>
             </li>)}</ul>
         </div> : <p className="chart-empty">Sem valores para este período.</p>}
     </section>;
 }
 
 export function MonthlyInsights({ month, summary }: { month: string; summary: MonthSummary }) {
-    const months = [5, 4, 3, 2, 1, 0].map(count => monthsBefore(month, count));
+    const months = Array.from({ length: 12 }, (_, index) => monthsBefore(month, 11 - index)).filter(Boolean);
     const [history, setHistory] = useState<MonthSummary[] | null>(null);
+    const [services, setServices] = useState<Entry[] | null>(null);
     const [serviceValues, setServiceValues] = useState<[string, number][] | null>(null);
     const [historyError, setHistoryError] = useState(false);
     const [servicesError, setServicesError] = useState(false);
+    const [revenueError, setRevenueError] = useState(false);
 
     useEffect(() => {
         let active = true;
-        const previousMonths = [5, 4, 3, 2, 1].map(count => monthsBefore(month, count));
+        const previousMonths = Array.from({ length: 11 }, (_, index) => monthsBefore(month, 11 - index)).filter(Boolean);
         void Promise.all(previousMonths.map(previous => request<MonthSummary>('resumo/' + previous)))
             .then(results => { if (active) setHistory(results); })
             .catch(() => { if (active) setHistoryError(true); });
-        void Promise.all([request<Entry[]>('servicos'), request<Entry[]>('recebimentos')])
+        const serviceRequest = request<Entry[]>('servicos');
+        void serviceRequest.then(result => { if (active) setServices(result); })
+            .catch(() => { if (active) setRevenueError(true); });
+        void Promise.all([serviceRequest, request<Entry[]>('recebimentos')])
             .then(([services, receipts]) => {
                 if (!active) return;
                 const selected = services.filter(entry => !entry.cancelado && entry.data.startsWith(month + '-'));
@@ -78,8 +74,8 @@ export function MonthlyInsights({ month, summary }: { month: string; summary: Mo
         categories.set(name, (categories.get(name) ?? 0) + entry.valor);
     }
     return <div className="monthly-insights">
-        {history ? <Evolution months={months} values={[...history, summary]} /> :
-            <p role="status">{historyError ? 'Não foi possível carregar o histórico mensal.' : 'Carregando histórico mensal…'}</p>}
+        <AnnualEvolution months={months} cash={history && [...history, summary]} services={services}
+            cashError={historyError} revenueError={revenueError} />
         <div className="dashboard-charts">
             <Donut title="Composição das despesas pagas" values={[...categories].sort((a, b) => b[1] - a[1])} />
             {serviceValues ? <Donut title="Recebimento dos serviços do mês" values={serviceValues} /> :
@@ -88,50 +84,4 @@ export function MonthlyInsights({ month, summary }: { month: string; summary: Mo
                 </section>}
         </div>
     </div>;
-}
-
-function Evolution({ months, values }: { months: string[]; values: MonthSummary[] }) {
-    const latest = months.length - 1;
-    const [selected, setSelected] = useState(latest);
-    const all = values.flatMap(value => metrics.map(metric => value[metric.key]));
-    const min = Math.min(0, ...all);
-    const max = Math.max(min + 100, ...all);
-    const x = (index: number) => 30 + index * 540 / latest;
-    const y = (value: number) => 18 + (max - value) / (max - min) * 144;
-    return <section className="dashboard-panel evolution">
-        <h3>Evolução mensal</h3>
-        <dl className="monthly-deltas">{metrics.map(metric => {
-            const difference = values[latest][metric.key] - values[latest - 1][metric.key];
-            return <div key={metric.key}><dt>{metric.label} vs. {label(months[latest - 1])}</dt>
-                <dd>{difference === 0 ? 'Sem variação' : (difference > 0 ? '+' : '') + money.format(difference / 100)}</dd></div>;
-        })}</dl>
-        <div className="evolution-chart">
-            <div className="chart-axis" aria-hidden="true"><span>{money.format(max / 100)}</span><span>{money.format(min / 100)}</span></div>
-            <svg viewBox="0 0 600 180" aria-hidden="true">
-                <line x1="0" x2="600" y1={y(0)} y2={y(0)} stroke="#7c8ea0" />
-                <line x1={x(selected)} x2={x(selected)} y1="12" y2="168" stroke="#7c8ea0" strokeDasharray="4 4" />
-                {metrics.map(metric => <g key={metric.key} fill={metric.color}>
-                    <polyline points={values.map((value, index) => `${x(index)},${y(value[metric.key])}`).join(' ')}
-                        fill="none" stroke={metric.color} strokeWidth="3" />
-                    {values.map((value, index) => <circle key={months[index]} cx={x(index)} cy={y(value[metric.key])}
-                        r={index === selected ? 7 : 5} stroke="white" strokeWidth="2" />)}
-                </g>)}
-            </svg>
-        </div>
-        <label className="evolution-month">Mês em destaque
-            <select value={selected} onChange={event => setSelected(Number(event.target.value))}>
-                {months.map((month, index) => <option key={month} value={index}>{label(month)}</option>)}
-            </select>
-        </label>
-        <dl className="monthly-deltas" aria-live="polite">{metrics.map(metric =>
-            <div key={metric.key}><dt><span className="series-key" aria-hidden="true" style={{ background: metric.color }} />{metric.label}</dt>
-                <dd>{money.format(values[selected][metric.key] / 100)}</dd></div>)}</dl>
-        <details><summary>Ver valores dos seis meses</summary>
-            <table className="chart-table"><caption>Comparação mensal em reais</caption>
-                <thead><tr><th scope="col">Mês</th>{metrics.map(metric => <th key={metric.key} scope="col">{metric.label}</th>)}</tr></thead>
-                <tbody>{values.map((value, index) => <tr key={months[index]}><th scope="row">{label(months[index])}</th>
-                    {metrics.map(metric => <td key={metric.key}>{money.format(value[metric.key] / 100)}</td>)}</tr>)}</tbody>
-            </table>
-        </details>
-    </section>;
 }

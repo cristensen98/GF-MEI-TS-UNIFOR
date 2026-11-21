@@ -2,9 +2,13 @@ import { createRoot } from 'react-dom/client';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { kinds, serviceTotal } from '../domain/model.ts';
+import { businessDate } from '../domain/calendar.ts';
 import type { Draft, Entry, Kind } from '../domain/model.ts';
-import { money, request } from './client.ts';
+import { formatMoney, request } from './client.ts';
 import { EntryForm } from './entry-form.tsx';
+import { DataTable } from './data-table.tsx';
+import { ActionButton } from './action-button.tsx';
+import { StatusBadge } from './status-badge.tsx';
 import { Modal } from './modal.tsx';
 import { dateLabel, MonthlyReport, ServiceReport } from './summary.tsx';
 import type { MonthSummary, ServiceSummary } from './summary.tsx';
@@ -12,6 +16,13 @@ import './style.css';
 
 const labels = { servicos: 'Serviços', despesas: 'Despesas', recebimentos: 'Recebimentos' };
 const newLabels = { servicos: 'Novo serviço', despesas: 'Nova despesa', recebimentos: 'Novo recebimento' };
+
+function entryStatus(kind: Kind, entry: Entry) {
+    if (entry.cancelado) return 'Cancelado';
+    if (kind === 'recebimentos') return 'Recebido';
+    if (kind === 'despesas') return entry.pagamento ? 'Paga' : 'A pagar';
+    return null;
+}
 
 function normalizeSearch(value: string) {
     return value.trim().toLocaleLowerCase('pt-BR').normalize('NFD').replace(/\p{M}/gu, '');
@@ -35,19 +46,20 @@ function SearchResults({ query, open }: { query: string; open: (kind: Kind, id: 
         <p role="alert">{error}</p>
         <p role="status">{results ? (results.length ? `${results.length} lançamento(s) encontrado(s).` :
             'Nenhum lançamento corresponde à pesquisa.') : error ? '' : 'Buscando lançamentos…'}</p>
-        {results && results.length > 0 && <ul className="entries" role="list">{results.map(({ kind, entry }) =>
-            <li key={entry.id}>
-                <div className="transaction">
-                    <div><strong>{entry.descricao}</strong><div className="muted">
-                        {labels[kind]} · {dateLabel(entry.data)}{entry.detalhe ? ' · ' + entry.detalhe : ''}
-                        {entry.cancelado ? ' · Cancelado' : kind === 'despesas' ? (entry.pagamento ? ' · Paga' : ' · A pagar') : ''}
-                    </div></div>
-                    <span className="transaction-value">{money.format((kind === 'servicos' ? serviceTotal(entry) : entry.valor) / 100)}</span>
-                </div>
-                <div className="actions"><button type="button"
-                    aria-label={`Ver ${entry.descricao}, ${dateLabel(entry.data)}, em ${labels[kind]}`}
-                    onClick={() => open(kind, entry.id)}>Ver em {labels[kind]}</button></div>
-            </li>)}</ul>}
+        {results && results.length > 0 && <DataTable key={query} label="Resultados da busca"
+            columns={['Descrição', 'Tipo', 'Data', 'Detalhe', 'Situação', 'Valor', 'Ações']}>{results.map(({ kind, entry }) => {
+            const status = entryStatus(kind, entry);
+            return <tr key={entry.id}>
+                <th scope="row">{entry.descricao}</th>
+                <td>{labels[kind]}</td>
+                <td><time dateTime={entry.data}>{dateLabel(entry.data)}</time></td>
+                <td>{entry.detalhe || '—'}</td>
+                <td>{status ? <StatusBadge status={status} /> : '—'}</td>
+                <td className="table-number">{formatMoney(kind === 'servicos' ? serviceTotal(entry) : entry.valor)}</td>
+                <td><ActionButton icon="view" label={`Ver ${entry.descricao}, ${dateLabel(entry.data)}, em ${labels[kind]}`}
+                    onClick={() => open(kind, entry.id)} /></td>
+            </tr>;
+        })}</DataTable>}
     </>;
 }
 
@@ -149,24 +161,25 @@ function Accounts({ currentUser }: { currentUser: string }) {
         <p role="alert">{error}</p>
         <p role="status">{notice || (accounts ? '' : error ? '' : 'Carregando contas…')}</p>
         {accounts?.length === 0 && <p className="empty">Nenhum usuário cadastrado pela equipe.</p>}
-        {accounts && accounts.length > 0 && <ul className="entries" role="list">{accounts.map(account => {
+        {accounts && accounts.length > 0 && <DataTable label="Contas de usuários"
+            columns={['Usuário', 'Perfil', 'Situação', 'Ações']}>{accounts.map(account => {
             const { usuario, aprovado, administrador, contaInstalacao } = account;
             return (
-            <li key={usuario} className="transaction"><div><strong>{usuario}</strong>
-                <span className="entry-status">{contaInstalacao ? 'Administrador da instalação' :
-                    administrador ? 'Administrador' : 'Usuário comum'}</span>
-                <span className="entry-status">{aprovado ? 'Aprovado' : 'Pendente'}</span></div>
-                {!contaInstalacao && <div className="actions">
-                    <button type="button" aria-haspopup="dialog" aria-label={'Editar ' + usuario} disabled={pending !== null}
+            <tr key={usuario}><th scope="row">{usuario}</th>
+                <td>{contaInstalacao ? 'Administrador da instalação' : administrador ? 'Administrador' : 'Usuário comum'}</td>
+                <td><StatusBadge status={aprovado ? 'Aprovado' : 'Pendente'} /></td>
+                <td>{contaInstalacao ? '—' : <div className="actions">
+                    <ActionButton icon="edit" aria-haspopup="dialog" label={'Editar ' + usuario} disabled={pending !== null}
                         onClick={event => {
                             setEditorError('');
                             setEditor({ trigger: event.currentTarget, account });
-                        }}>Editar</button>
-                    {!aprovado && <button type="button" aria-label={'Aprovar ' + usuario} disabled={pending !== null}
-                        onClick={() => void approve(usuario)}>{pending === usuario ? 'Aprovando…' : 'Aprovar'}</button>}
-                </div>}
-            </li>);
-        })}</ul>}
+                        }} />
+                    {!aprovado && <ActionButton icon={pending === usuario ? 'pending' : 'approve'}
+                        label={(pending === usuario ? 'Aprovando ' : 'Aprovar ') + usuario} disabled={pending !== null}
+                        onClick={() => void approve(usuario)} />}
+                </div>}</td>
+            </tr>);
+        })}</DataTable>}
         {editor && <Modal title={editor.account ? 'Editar ' + editor.account.usuario : 'Criar usuário'}
             trigger={editor.trigger} busy={saving} close={() => setEditor(null)}>
             <form className="login-form" onSubmit={saveAccount}>
@@ -297,7 +310,7 @@ function Workspace({ usuario, administrador, exit, exiting, sessionError }: {
     sessionError: string;
 }) {
     const [view, setView] = useState<Kind | 'resumo' | 'usuarios'>('resumo');
-    const [month, setMonth] = useState(new Intl.DateTimeFormat('sv-SE', { year: 'numeric', month: '2-digit' }).format(new Date()));
+    const [month, setMonth] = useState(() => businessDate().slice(0, 7));
     const [entries, setEntries] = useState<Entry[]>([]);
     const [services, setServices] = useState<Entry[]>([]);
     const [receivedByService, setReceivedByService] = useState(new Map<number, number>());
@@ -479,43 +492,44 @@ function Workspace({ usuario, administrador, exit, exiting, sessionError }: {
                         }} />
                 </Modal>}
                 {!loading && !error && entries.length === 0 && <p className="empty">Nenhum lançamento cadastrado.</p>}
-                <ul className="entries" role="list">{entries.map(entry => {
+                {entries.length > 0 && <DataTable key={view} label={labels[view]}
+                    targetRow={searchTarget === null ? -1 : entries.findIndex(entry => entry.id === searchTarget)} columns={[
+                    'Descrição', 'Data', view === 'servicos' ? 'Cliente' : view === 'despesas' ? 'Categoria' : 'Serviço',
+                    'Situação', ...(view === 'servicos' ? ['Serviço', 'Custo direto', 'Total'] : ['Valor']), 'Ações'
+                ]}>{entries.map(entry => {
                     const received = receivedByService.get(entry.id) ?? 0;
-                    const status = entry.cancelado ? 'Cancelado' : view !== 'servicos' ? null :
-                        received === serviceTotal(entry) ? 'Quitado' : received > 0 ? 'Parcial' : 'Em aberto';
-                    return <li key={entry.id} id={'entry-' + entry.id} tabIndex={-1}>
-                        <div className={view === 'servicos' ? 'service-card-content' : 'transaction'}>
-                            <div>
-                                <strong>{entry.descricao}</strong>
-                                {status && <span className="entry-status">{status}</span>}
-                                {!entry.cancelado && view === 'despesas' && <>
-                                    {(entry.recorrente || entry.recorrenciaOrigem) && <span className="entry-status">Mensal</span>}
-                                    <span className="entry-status">{entry.pagamento ? 'Paga' : 'A pagar'}</span>
-                                </>}
-                                <div className="muted"><time dateTime={entry.data}>{dateLabel(entry.data)}</time>
-                                    {entry.detalhe ? ' · ' + entry.detalhe : ''}</div>
-                            </div>
-                            {view === 'servicos' ? <dl className="service-breakdown">
-                                <div><dt>Serviço</dt><dd>{money.format(entry.valor / 100)}</dd></div>
-                                <div><dt>Custo direto</dt>
-                                    <dd>{money.format((entry.custoDireto ?? entry.custoMaterial ?? 0) / 100)}</dd></div>
-                                <div><dt>Total</dt><dd>{money.format(serviceTotal(entry) / 100)}</dd></div>
-                            </dl> : <span className="transaction-value">{money.format(entry.valor / 100)}</span>}
-                        </div>
-                        {!entry.cancelado && <div className="actions">
-                            <button disabled={busy} aria-label={'Editar ' + entry.descricao} aria-haspopup="dialog"
+                    const status = entryStatus(view, entry) ??
+                        (received === serviceTotal(entry) ? 'Quitado' : received > 0 ? 'Parcial' : 'Em aberto');
+                    return <tr key={entry.id} id={'entry-' + entry.id} tabIndex={-1}>
+                            <th scope="row">{entry.descricao}</th>
+                            <td><time dateTime={entry.data}>{dateLabel(entry.data)}</time></td>
+                            <td>{view === 'recebimentos'
+                                ? services.find(service => service.id === entry.servico)?.descricao ?? '—'
+                                : entry.detalhe || '—'}</td>
+                            <td>
+                                {view === 'despesas' && !entry.cancelado && (entry.recorrente || entry.recorrenciaOrigem) &&
+                                    <StatusBadge status="Mensal" />}
+                                <StatusBadge status={status} />
+                            </td>
+                            <td className="table-number">{formatMoney(entry.valor)}</td>
+                            {view === 'servicos' && <>
+                                <td className="table-number">{formatMoney(entry.custoDireto ?? entry.custoMaterial ?? 0)}</td>
+                                <td className="table-number">{formatMoney(serviceTotal(entry))}</td>
+                            </>}
+                        <td>{entry.cancelado ? '—' : <div className="actions">
+                            <ActionButton icon="edit" disabled={busy} label={'Editar ' + entry.descricao} aria-haspopup="dialog"
                                 onClick={event => {
                                     formTrigger.current = event.currentTarget;
                                     setForm({ entry });
-                                }}>Editar</button>
-                            {view === 'servicos' && <button disabled={busy} aria-label={'Ver situação de ' + entry.descricao}
+                                }} />
+                            {view === 'servicos' && <ActionButton icon="view" disabled={busy} label={'Ver situação de ' + entry.descricao}
                                 aria-haspopup="dialog" onClick={event => {
                                     detailTrigger.current = event.currentTarget;
                                     setDetail(null);
                                     setDetailError('');
                                     setDetailEntry(entry);
-                                }}>Ver situação</button>}
-                            <button className="danger" disabled={busy} aria-label={'Cancelar lançamento ' + entry.descricao}
+                                }} />}
+                            <ActionButton icon="cancel" disabled={busy} label={'Cancelar lançamento ' + entry.descricao}
                                 onClick={() => {
                                     if (window.confirm('Cancelar o lançamento “' + entry.descricao + '”?')) {
                                         void mutate(view + '/' + entry.id, 'DELETE').then(() => {
@@ -527,10 +541,10 @@ function Workspace({ usuario, administrador, exit, exiting, sessionError }: {
                                                 document.getElementById('cancel-' + entry.id)?.focus());
                                         });
                                     }
-                                }} id={'cancel-' + entry.id}>Cancelar lançamento</button>
-                        </div>}
-                    </li>;
-                })}</ul>
+                                }} id={'cancel-' + entry.id} />
+                        </div>}</td>
+                    </tr>;
+                })}</DataTable>}
                 {detailEntry && <Modal title={'Situação de ' + detailEntry.descricao} trigger={detailTrigger.current}
                     close={() => setDetailEntry(null)}>
                     <p role="alert">{detailError}</p>

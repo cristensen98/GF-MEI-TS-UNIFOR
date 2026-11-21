@@ -1,13 +1,13 @@
 import { DomainError, serviceTotal } from './model.ts';
 import type { Entry, Kind, Repository } from './model.ts';
 import { parseDraft } from './validation.ts';
+import { businessDate } from './calendar.ts';
 
 export class Ledger {
     private repository: Repository;
     private today: () => string;
 
-    constructor(repository: Repository, today = () =>
-        new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date())) {
+    constructor(repository: Repository, today = businessDate) {
         this.repository = repository;
         this.today = today;
     }

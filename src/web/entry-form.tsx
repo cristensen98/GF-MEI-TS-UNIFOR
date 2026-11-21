@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { cents, money } from './client.ts';
+import { amountInput, cents, formatMoney } from './client.ts';
 import { serviceTotal } from '../domain/model.ts';
 import type { Draft, Entry, Kind } from '../domain/model.ts';
 import type { FormEvent } from 'react';
@@ -17,14 +17,13 @@ export function EntryForm({ kind, selected, services, save, close, busy }: Props
     const amount = useRef<HTMLInputElement>(null);
     const [amountError, setAmountError] = useState('');
     const [error, setError] = useState('');
-    const [baseText, setBaseText] = useState(selected ? (selected.valor / 100).toFixed(2).replace('.', ',') : '');
-    const [materialText, setMaterialText] = useState(selected?.custoMaterial == null ? '' :
-        (selected.custoMaterial / 100).toFixed(2).replace('.', ','));
+    const [baseText, setBaseText] = useState(selected ? amountInput(selected.valor) : '');
+    const [materialText, setMaterialText] = useState(selected?.custoMaterial == null ? '' : amountInput(selected.custoMaterial));
     let preview = '—';
     if (kind === 'servicos' && baseText.trim()) {
         try {
             const total = serviceTotal({ valor: cents(baseText), custoMaterial: materialText.trim() ? cents(materialText, 0) : null });
-            if (Number.isSafeInteger(total)) preview = money.format(total / 100);
+            if (Number.isSafeInteger(total)) preview = formatMoney(total);
         } catch {
             // Incomplete amounts are common while typing.
         }

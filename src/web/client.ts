@@ -16,7 +16,22 @@ export async function request<T>(path: string, method = 'GET', body?: unknown): 
     return response.status === 204 ? undefined as T : response.json();
 }
 
-export const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+function centFraction(cents: number) {
+    return String(Math.abs(cents % 100)).padStart(2, '0');
+}
+
+export function formatMoney(cents: number) {
+    const fraction = centFraction(cents);
+    return money.formatToParts(Math.trunc(cents / 100))
+        .map(part => part.type === 'fraction' ? fraction : part.value).join('');
+}
+
+export function amountInput(cents: number) {
+    const sign = cents < 0 ? '-' : '';
+    return `${sign}${Math.trunc(Math.abs(cents) / 100)},${centFraction(cents)}`;
+}
 
 export function cents(value: string, minimum = 1) {
     const match = /^(\d+)(?:[,.](\d{1,2}))?$/.exec(value.trim());
