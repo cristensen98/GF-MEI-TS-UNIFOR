@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { ErrorRequestHandler, RequestHandler } from 'express';
+import type { ErrorRequestHandler } from 'express';
 import { DomainError, kinds } from '../domain/model.ts';
 import type { Ledger } from '../domain/ledger.ts';
 
@@ -14,26 +14,31 @@ function parseId(value: string | string[]) {
     return id;
 }
 
-export function api(ledger: Ledger) {
+export function api(forWorkspace: (workspace: string) => Ledger) {
     const router = Router();
+    router.use((_req, res, next) => {
+        const workspace = res.locals.session?.workspace;
+        if (workspace !== 'installation' && (typeof workspace !== 'string' || !/^[a-f0-9]{32}$/.test(workspace))) {
+            res.status(403).json({ erro: 'A conta não tem um espaço financeiro válido.' });
+            return;
+        }
+        res.locals.ledger = forWorkspace(workspace);
+        next();
+    });
     router.get('/resumo/:mes', (req, res) => {
-        res.json(ledger.monthlySummary(req.params.mes));
+        res.json((res.locals.ledger as Ledger).monthlySummary(req.params.mes));
     });
     router.get('/servicos/:id/resumo', (req, res) => {
-        res.json(ledger.serviceSummary(parseId(req.params.id)));
+        res.json((res.locals.ledger as Ledger).serviceSummary(parseId(req.params.id)));
     });
-    const requireAdministrator: RequestHandler = (_req, res, next) => {
-        if (res.locals.session?.administrador === true) next();
-        else res.status(403).json({ erro: 'Apenas administradores podem alterar lançamentos.' });
-    };
     for (const kind of kinds) {
         const resource = '/' + kind;
-        router.get(resource, (_req, res) => { res.json(ledger.list(kind)); });
-        router.get(resource + '/:id', (req, res) => { res.json(ledger.get(kind, parseId(req.params.id))); });
-        router.post(resource, requireAdministrator, (req, res) => { res.status(201).json(ledger.save(kind, req.body)); });
-        router.put(resource + '/:id', requireAdministrator, (req, res) => { res.json(ledger.save(kind, req.body, parseId(req.params.id))); });
-        router.delete(resource + '/:id', requireAdministrator, (req, res) => {
-            ledger.cancel(kind, parseId(req.params.id));
+        router.get(resource, (_req, res) => { res.json((res.locals.ledger as Ledger).list(kind)); });
+        router.get(resource + '/:id', (req, res) => { res.json((res.locals.ledger as Ledger).get(kind, parseId(req.params.id))); });
+        router.post(resource, (req, res) => { res.status(201).json((res.locals.ledger as Ledger).save(kind, req.body)); });
+        router.put(resource + '/:id', (req, res) => { res.json((res.locals.ledger as Ledger).save(kind, req.body, parseId(req.params.id))); });
+        router.delete(resource + '/:id', (req, res) => {
+            (res.locals.ledger as Ledger).cancel(kind, parseId(req.params.id));
             res.sendStatus(204);
         });
     }
@@ -41,14 +46,23 @@ export function api(ledger: Ledger) {
     return router;
 }
 
-export const handleError: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
+export const handleError: ErrorRequestHandler = (error: unknown, _req, res, next) => {
+    if (res.headersSent) {
+        next(error);
+        return;
+    }
+    const status = error instanceof Error && 'status' in error ? error.status : undefined;
     if (error instanceof DomainError) {
         res.status(error.status).json({ erro: error.message });
-    } else if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
-        res.status(400).json({ erro: 'JSON inválido.' });
+    } else if (status === 400) {
+        res.status(400).json({ erro: error instanceof SyntaxError ? 'JSON inválido.' : 'Solicitação inválida.' });
+    } else if (status === 413) {
+        res.status(413).json({ erro: 'Os dados enviados excedem o limite permitido.' });
+    } else if (status === 415) {
+        res.status(415).json({ erro: 'Envie os dados em JSON UTF-8 sem compactação.' });
     } else {
-        console.error(error);
-        res.status(500).json({ erro: 'Falha ao processar o lançamento.' });
+        console.error('Falha interna ao processar uma solicitação do GF-MEI.');
+        res.status(500).json({ erro: 'Falha ao processar a solicitação.' });
     }
 };
 

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Entry } from '../domain/model.ts';
 import { recordedRevenue } from '../domain/mei-revenue.ts';
-import { formatMoney } from './client.ts';
+import { formatMoney, request } from './client.ts';
 import type { MonthSummary } from './summary.tsx';
 
 const metrics = [
@@ -13,7 +13,7 @@ const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'short', year: 'nume
 const label = (month: string) => monthName.format(new Date(month + '-01T00:00:00Z'));
 
 type Revenue = ReturnType<typeof recordedRevenue>;
-type Series = { label: string; color: string; values: number[] };
+type Series = { label: string; color: string; values: (number | bigint)[] };
 
 function EvolutionChart({ months, selected, series, revenue }: {
     months: string[]; selected: number; series: Series[]; revenue: Revenue | null;
@@ -21,18 +21,21 @@ function EvolutionChart({ months, selected, series, revenue }: {
     const ceiling = { label: 'Teto do MEI', color: '#895514', dash: '6 4' };
     const boundary = { label: 'Teto + 20%', color: '#991b1b', dash: '2 4' };
     const guides = revenue?.some(point => point.thresholds) ? [ceiling, boundary] : [];
-    const data = series.flatMap(item => item.values);
-    const min = Math.min(0, ...data);
-    const max = Math.max(min + 100, ...data, ...(revenue?.map(point => point.thresholds?.excessBoundary ?? 0) ?? []));
+    const seriesDashes = [undefined, '8 4', '2 4'];
+    const data = series.flatMap(item => item.values.map(value => BigInt(value)));
+    const limits = revenue?.map(point => BigInt(point.thresholds?.excessBoundary ?? 0)) ?? [];
+    const min = data.reduce((lowest, value) => value < lowest ? value : lowest, 0n);
+    const max = [...data, ...limits].reduce((highest, value) => value > highest ? value : highest, min + 100n);
     const step = 600 / months.length;
     const x = (index: number) => 18 + step * (index + .5);
-    const y = (value: number) => 12 + (max - value) / (max - min) * 143;
+    const y = (value: number | bigint) => 12 + Number(max - BigInt(value)) / Number(max - min) * 143;
 
     return <>
         <div className="annual-legend" aria-hidden="true">
-            {series.map(item => <span key={item.label}><i style={{ color: item.color }} />{item.label}</span>)}
-            {guides.map(guide => <span key={guide.label}><i className={guide === boundary ? 'chart-guide-dotted' : 'chart-guide'}
-                style={{ color: guide.color }} />{guide.label}</span>)}
+            {[...series.map((item, index) => ({ ...item, dash: seriesDashes[index] })), ...guides].map(item =>
+                <span key={item.label}><svg width="23" height="10" viewBox="0 0 23 10">
+                    <line x1="0" x2="23" y1="5" y2="5" stroke={item.color} strokeWidth="2.5" strokeDasharray={item.dash} />
+                </svg>{item.label}</span>)}
         </div>
         <div className="evolution-chart" aria-hidden="true">
             <div className="chart-axis"><span>{formatMoney(max)}</span><span>{formatMoney(min)}</span></div>
@@ -44,11 +47,11 @@ function EvolutionChart({ months, selected, series, revenue }: {
                         <path d={`M${x(index) - step / 2} ${y(thresholds.excessBoundary)}h${step}`} stroke={boundary.color} strokeDasharray={boundary.dash} />
                     </g>)}
                     <line x1={x(selected)} x2={x(selected)} y1="8" y2="158" stroke="#7c8ea0" strokeDasharray="4 4" />
-                    {series.map(item => <g key={item.label} fill={item.color}>
+                    {series.map((item, seriesIndex) => <g key={item.label} fill={item.color}>
                         <path d={item.values.map((value, index) => {
                             const reset = revenue && revenue[index].year !== revenue[index - 1]?.year;
                             return `${index === 0 || reset ? 'M' : 'L'}${x(index)} ${y(value)}`;
-                        }).join(' ')} fill="none" stroke={item.color} strokeWidth="2.5" />
+                        }).join(' ')} fill="none" stroke={item.color} strokeWidth="2.5" strokeDasharray={seriesDashes[seriesIndex]} />
                         {item.values.map((value, index) => <circle key={months[index]} cx={x(index)} cy={y(value)}
                             r={index === selected ? 6 : 4} stroke="white" strokeWidth="1.5" />)}
                     </g>)}
@@ -60,15 +63,41 @@ function EvolutionChart({ months, selected, series, revenue }: {
     </>;
 }
 
-export function AnnualEvolution({ months, referenceIndex, cash, services, cashError, revenueError }: {
-    referenceIndex: number;
-    months: string[]; cash: MonthSummary[] | null; services: Entry[] | null;
-    cashError: boolean; revenueError: boolean;
-}) {
-    const [selected, setSelected] = useState(referenceIndex);
+function monthsOfYear(year: string) {
+    return Array.from({ length: 12 }, (_, index) => year + '-' + String(index + 1).padStart(2, '0'));
+}
+
+export function AnnualEvolution({ month }: { month: string }) {
+    const year = month.slice(0, 4);
+    const months = monthsOfYear(year);
+    const [selected, setSelected] = useState(Number(month.slice(5)) - 1);
     const [fiscal, setFiscal] = useState(true);
+    const [cash, setCash] = useState<MonthSummary[] | null>(null);
+    const [services, setServices] = useState<Entry[] | null>(null);
+    const [cashError, setCashError] = useState(false);
+    const [revenueError, setRevenueError] = useState(false);
+
+    useEffect(() => {
+        let active = true;
+        void request<Entry[]>('servicos').then(result => { if (active) setServices(result); })
+            .catch(() => { if (active) setRevenueError(true); });
+        return () => { active = false; };
+    }, []);
+
+    useEffect(() => {
+        if (fiscal || cash) return;
+        let active = true;
+        setCashError(false);
+        void Promise.all(monthsOfYear(year).map(item => request<MonthSummary>('resumo/' + item)))
+            .then(result => { if (active) setCash(result); })
+            .catch(() => { if (active) setCashError(true); });
+        return () => { active = false; };
+    }, [cash, fiscal, year]);
+
     const revenue = services && recordedRevenue(months, services);
     const selectedRevenue = revenue?.[selected];
+    const thresholds = selectedRevenue?.thresholds;
+    const room = selectedRevenue && thresholds ? BigInt(thresholds.ceiling) - selectedRevenue.total : null;
     const activeRevenue = fiscal ? revenue : null;
     const series = fiscal
         ? revenue && [{ label: 'Faturamento acumulado no ano', color: '#087565', values: revenue.map(point => point.total) }]
@@ -76,8 +105,7 @@ export function AnnualEvolution({ months, referenceIndex, cash, services, cashEr
     const loadError = fiscal ? revenueError : cashError;
 
     return <section className="dashboard-panel evolution" aria-labelledby="annual-evolution-title">
-        <h3 id="annual-evolution-title">Evolução anual</h3>
-        <p className="muted">Janeiro a dezembro de {months[0].slice(0, 4)}</p>
+        <h3 id="annual-evolution-title">Janeiro a dezembro de {year}</h3>
         <div className="annual-controls">
             <div className="actions" role="group" aria-label="Dados do gráfico">
                 <button type="button" aria-pressed={fiscal} onClick={() => setFiscal(true)}>Faturamento e limite MEI</button>
@@ -90,8 +118,15 @@ export function AnnualEvolution({ months, referenceIndex, cash, services, cashEr
             </label>
         </div>
         {series ? <>
-            {fiscal && selectedRevenue && <div className="revenue-alert" aria-live="polite">
-                <strong>{selectedRevenue.year} · {formatMoney(selectedRevenue.total)} acumulados</strong>
+            {fiscal && selectedRevenue && <div className="annual-metrics" aria-live="polite">
+                <dl className="monthly-deltas">
+                    <div><dt>Faturamento até {label(months[selected])}</dt><dd>{formatMoney(selectedRevenue.total)}</dd></div>
+                    {thresholds && <div><dt>{thresholds.projected ? 'Teto anual previsto' : 'Teto do ano completo'}</dt>
+                        <dd>{formatMoney(thresholds.ceiling)}</dd></div>}
+                    {room !== null && <div><dt>{room < 0 ? 'Excedente sobre o teto' : 'Margem até o teto'}</dt>
+                        <dd>{formatMoney(room < 0n ? -room : room)}</dd></div>}
+                </dl>
+                <div className="revenue-alert">
                 {selectedRevenue.band && <span className="entry-status" data-tone={selectedRevenue.band.tone}>
                     {selectedRevenue.band.label}
                 </span>}
@@ -102,11 +137,13 @@ export function AnnualEvolution({ months, referenceIndex, cash, services, cashEr
                 {selectedRevenue.thresholds?.projected && <p className="muted">Ampliação sujeita à condição orçamentária da LC 238/2026.</p>}
                 {!selectedRevenue.thresholds && <p className="muted">Faixas de referência disponíveis a partir de 2018.</p>}
                 <p className="muted">Estimativa pelos serviços cadastrados, na data do serviço. O acumulado reinicia em janeiro. No ano de abertura, o teto é proporcional aos meses de atividade.</p>
+                </div>
             </div>}
-            <EvolutionChart months={months} selected={selected} series={series} revenue={activeRevenue} />
-            {!fiscal && <dl className="monthly-deltas" aria-live="polite">{series.map(item =>
+            {!fiscal && <dl className="monthly-deltas annual-metrics" aria-live="polite">{series.map(item =>
                 <div key={item.label}><dt>{item.label}</dt><dd>{formatMoney(item.values[selected])}</dd></div>)}</dl>}
-            <details><summary>Ver valores dos {months.length} meses</summary>
+            <EvolutionChart months={months} selected={selected} series={series} revenue={activeRevenue} />
+            <section className="annual-information" aria-labelledby="annual-values-heading">
+                <h4 id="annual-values-heading">Valores dos {months.length} meses</h4>
                 <div className="table-scroll" role="region" aria-label="Valores da evolução anual" tabIndex={0}>
                     <table className="chart-table annual-values-table">
                         <caption>{fiscal ? 'Faturamento registrado e faixa de referência' : 'Fluxo de caixa mensal'}</caption>
@@ -121,17 +158,18 @@ export function AnnualEvolution({ months, referenceIndex, cash, services, cashEr
                         </tr>)}</tbody>
                     </table>
                 </div>
-            </details>
+            </section>
         </> : <p role={loadError ? 'alert' : 'status'}>
             {loadError ? 'Não foi possível carregar os dados do gráfico.' : 'Carregando dados do gráfico…'}
         </p>}
-        {fiscal && <details><summary>Entender os alertas do MEI</summary>
+        {fiscal && <section className="annual-information" aria-labelledby="annual-alerts-heading">
+            <h4 id="annual-alerts-heading">Entender os alertas do MEI</h4>
             <dl className="revenue-rules">
                 <dt>Dentro do teto</dt><dd>O faturamento registrado está dentro da faixa de referência.</dd>
                 <dt>Excesso de até 20%</dt><dd>O desenquadramento por faturamento produz efeitos no ano seguinte. A diferença sobre o excesso é apurada na DASN-SIMEI.</dd>
                 <dt>Excesso acima de 20%</dt><dd>O desenquadramento por faturamento produz efeitos retroativos a janeiro, ou ao início da atividade no ano de abertura. A apuração passa a seguir as regras aplicáveis do Simples Nacional.</dd>
             </dl>
             <p>Quando houver excesso, o prazo de comunicação é o último dia útil do mês seguinte ao da ocorrência. Consulte a <a href="https://legis.senado.gov.br/norma/572878/publicacao/34621013">LC 123/2006, art. 18-A</a> e a <a href="https://legis.senado.gov.br/norma/44276013/publicacao/44280206">LC 238/2026</a>.</p>
-        </details>}
+        </section>}
     </section>;
 }

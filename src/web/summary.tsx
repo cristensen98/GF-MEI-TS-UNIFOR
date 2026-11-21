@@ -58,7 +58,7 @@ function CashCharts({ summary, month }: { summary: MonthSummary; month: string }
             <h3 id="cash-heading">Fluxo de caixa</h3>
             <p className="muted">Entradas e despesas pagas por período</p>
             {summary.entradas || summary.saidas ? <>
-                <div className="chart-legend"><span>Entradas</span><span>Despesas pagas</span></div>
+                <div className="chart-legend" aria-hidden="true"><span>Entradas à esquerda</span><span>Despesas pagas à direita</span></div>
                 <div className="cash-chart" aria-hidden="true">
                     <div className="chart-scale">
                         <span>{formatMoney(scale)}</span><span>{formatMoney(0)}</span>

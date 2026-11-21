@@ -41,7 +41,11 @@ Execute `npm test`. Os testes usam o executor nativo do Node.js e o SQLite em me
 
 ## Limites desta versão
 
-O servidor escuta apenas no endereço local. A conta configurada no ambiente é a administradora. Na tela de login, **Criar conta** solicita usuário e senha. Na seção **Usuários**, o administrador aprova contas pendentes ou cria usuários com acesso imediato. As contas aprovadas acessam os mesmos lançamentos financeiros.
+O servidor escuta apenas no endereço local. A conta configurada no ambiente é a administradora. Na tela de login, **Criar conta** cadastra o usuário e inicia a sessão no próprio espaço financeiro. Contas do fluxo antigo que ainda estão pendentes são liberadas no próximo login com senha válida.
 
-O JWT fica em um cookie HttpOnly com validade de oito horas. Sair revoga a sessão no servidor. Reiniciar o servidor encerra todas as sessões. Para acesso remoto, são necessários HTTPS e uma configuração própria de produção.
+Cada conta tem um espaço financeiro próprio, identificado no servidor. A conta da instalação também acessa apenas os lançamentos do próprio espaço. Os lançamentos do banco compartilhado anterior ficam reservados no banco até a confirmação de sua titularidade e a migração para o espaço correspondente.
+
+O JWT fica em um cookie HttpOnly com validade de oito horas. Sair revoga a sessão no servidor. Reiniciar o servidor encerra todas as sessões. O servidor aceita os endereços locais 127.0.0.1 e localhost. Para acesso remoto, são necessários HTTPS e uma configuração própria de produção.
+
+**Alterar senha** exige a senha atual e encerra as demais sessões da conta. Para o administrador da instalação, `GFMEI_PASSWORD` fornece a senha inicial. A senha definida depois pelo menu fica no SQLite e passa a valer para os próximos acessos, inclusive após reiniciar o servidor.
 

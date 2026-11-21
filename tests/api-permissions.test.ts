@@ -7,15 +7,23 @@ import { kinds } from '../src/domain/model.ts';
 import { api, handleError } from '../src/server/api.ts';
 import { SqliteRepository } from '../src/server/sqlite.ts';
 
-test('permite consultas a usuários comuns e reserva alterações ao administrador', async () => {
+test('isola consultas e alterações por MEI, inclusive para o administrador', async () => {
     const repository = new SqliteRepository(':memory:');
-    const ledger = new Ledger(repository);
-    const app = express();
+    const first = 'a'.repeat(32);
+    const second = 'installation';
     const draft = { descricao: 'Serviço', valor: 10000, data: '2026-11-20' };
-    const entry = ledger.save('servicos', draft);
+    const legacy = new Ledger(repository).save('servicos', draft);
+    const app = express();
     app.use(express.json());
-    app.use('/leitura', (_req, res, next) => { res.locals.session = { administrador: false }; next(); }, api(ledger));
-    app.use('/gestao', (_req, res, next) => { res.locals.session = { administrador: true }; next(); }, api(ledger));
+    const finance = api(workspace => new Ledger(repository.forWorkspace(workspace)));
+    app.use('/primeiro', (_req, res, next) => {
+        res.locals.session = { workspace: first, administrador: false };
+        next();
+    }, finance);
+    app.use('/segundo', (_req, res, next) => {
+        res.locals.session = { workspace: second, administrador: true };
+        next();
+    }, finance);
     app.use(handleError);
     const server = app.listen(0, '127.0.0.1');
     try {
@@ -23,20 +31,38 @@ test('permite consultas a usuários comuns e reserva alterações ao administrad
         const address = server.address();
         assert.ok(address && typeof address === 'object');
         const base = 'http://127.0.0.1:' + address.port;
-        for (const kind of kinds) {
-            assert.equal((await fetch(base + '/leitura/' + kind)).status, 200);
-            for (const method of ['POST', 'PUT', 'DELETE']) {
-                const path = kind + (method === 'POST' ? '' : '/' + entry.id);
-                assert.equal((await fetch(base + '/leitura/' + path, { method })).status, 403);
-            }
-        }
-        assert.equal((await fetch(base + '/leitura/servicos/' + entry.id + '/resumo')).status, 200);
-        const created = await fetch(base + '/gestao/servicos', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft)
+        const json = { 'Content-Type': 'application/json' };
+        const created = await fetch(base + '/primeiro/servicos', {
+            method: 'POST', headers: json, body: JSON.stringify(draft)
         });
         assert.equal(created.status, 201);
         const { id } = await created.json() as { id: number };
-        assert.equal((await fetch(base + '/gestao/servicos/' + id, { method: 'DELETE' })).status, 204);
+        const receipt = await fetch(base + '/primeiro/recebimentos', {
+            method: 'POST', headers: json, body: JSON.stringify({ ...draft, servico: id })
+        });
+        assert.equal(receipt.status, 201);
+        for (const kind of kinds) {
+            assert.deepEqual(await (await fetch(base + '/segundo/' + kind)).json(), []);
+        }
+        for (const suffix of [String(id), id + '/resumo', String(legacy.id)]) {
+            assert.equal((await fetch(base + '/segundo/servicos/' + suffix)).status, 404);
+        }
+        const linked = await fetch(base + '/segundo/recebimentos', {
+            method: 'POST', headers: json, body: JSON.stringify({ ...draft, servico: id })
+        });
+        assert.equal(linked.status, 404);
+        for (const method of ['PUT', 'DELETE']) {
+            assert.equal((await fetch(base + '/segundo/servicos/' + id, {
+                method, headers: json, body: JSON.stringify(draft)
+            })).status, 404);
+        }
+        assert.equal((await (await fetch(base + '/primeiro/resumo/2026-11')).json()).entradas, 10000);
+        assert.equal((await (await fetch(base + '/segundo/resumo/2026-11')).json()).entradas, 0);
+        assert.equal((await fetch(base + '/primeiro/servicos/' + id, {
+            method: 'PUT', headers: json, body: JSON.stringify({ ...draft, descricao: 'Editado' })
+        })).status, 200);
+        const { id: receiptId } = await receipt.json() as { id: number };
+        assert.equal((await fetch(base + '/primeiro/recebimentos/' + receiptId, { method: 'DELETE' })).status, 204);
     } finally {
         server.close();
         repository.close();

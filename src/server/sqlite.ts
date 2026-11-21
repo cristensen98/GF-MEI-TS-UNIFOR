@@ -16,8 +16,14 @@ function mapEntry(row: Record<string, unknown>): Entry {
 
 export class SqliteRepository implements Repository {
     private db: DatabaseSync;
+    private readonly workspace: string;
 
-    constructor(path: string) {
+    constructor(path: string | DatabaseSync, workspace = 'legacy') {
+        this.workspace = workspace;
+        if (typeof path !== 'string') {
+            this.db = path;
+            return;
+        }
         this.db = new DatabaseSync(path);
         this.db.exec(`
             PRAGMA foreign_keys = ON;
@@ -40,6 +46,10 @@ export class SqliteRepository implements Repository {
         `);
         this.transaction(() => {
             const columns = this.db.prepare('PRAGMA table_info(lancamentos)').all();
+            if (!columns.some(column => column.name === 'workspace')) {
+                this.db.exec(`ALTER TABLE lancamentos ADD COLUMN workspace TEXT NOT NULL DEFAULT 'legacy';
+                    CREATE INDEX lancamentos_workspace_tipo_data ON lancamentos(workspace, tipo, data);`);
+            }
             if (!columns.some(column => column.name === 'custo_material')) {
                 this.db.exec('ALTER TABLE lancamentos ADD COLUMN custo_material INTEGER CHECK (custo_material >= 0 AND tipo = \'servicos\' OR custo_material IS NULL)');
             }
@@ -52,6 +62,10 @@ export class SqliteRepository implements Repository {
                 `);
             }
         });
+    }
+
+    forWorkspace(workspace: string) {
+        return new SqliteRepository(this.db, workspace);
     }
 
     transaction<T>(action: () => T): T {
@@ -67,19 +81,21 @@ export class SqliteRepository implements Repository {
     }
 
     list(kind: Kind) {
-        return this.db.prepare('SELECT * FROM lancamentos WHERE tipo = ? ORDER BY data DESC, id DESC').all(kind).map(mapEntry);
+        return this.db.prepare('SELECT * FROM lancamentos WHERE workspace = ? AND tipo = ? ORDER BY data DESC, id DESC')
+            .all(this.workspace, kind).map(mapEntry);
     }
 
     get(kind: Kind, id: number) {
-        const row = this.db.prepare('SELECT * FROM lancamentos WHERE tipo = ? AND id = ?').get(kind, id);
+        const row = this.db.prepare('SELECT * FROM lancamentos WHERE workspace = ? AND tipo = ? AND id = ?')
+            .get(this.workspace, kind, id);
         return row ? mapEntry(row) : undefined;
     }
 
     create(kind: Kind, draft: Draft): Entry {
         const row = this.db.prepare(`
-            INSERT INTO lancamentos (tipo, descricao, detalhe, valor, data, servico, pagamento, recorrencia_desde, custo_material)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *
-        `).get(kind, draft.descricao, draft.detalhe, draft.valor, draft.data, draft.servico, draft.pagamento,
+            INSERT INTO lancamentos (workspace, tipo, descricao, detalhe, valor, data, servico, pagamento, recorrencia_desde, custo_material)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *
+        `).get(this.workspace, kind, draft.descricao, draft.detalhe, draft.valor, draft.data, draft.servico, draft.pagamento,
             draft.recorrente ? draft.data : null, draft.custoMaterial ?? null);
         return mapEntry(row!);
     }
@@ -89,14 +105,15 @@ export class SqliteRepository implements Repository {
             UPDATE lancamentos SET descricao = ?, detalhe = ?, valor = ?, data = ?, servico = ?, pagamento = ?,
                 recorrencia_desde = CASE WHEN ? THEN COALESCE(recorrencia_desde, ?) END,
                 custo_material = CASE WHEN ? THEN ? ELSE custo_material END
-            WHERE tipo = ? AND id = ? RETURNING *
+            WHERE workspace = ? AND tipo = ? AND id = ? RETURNING *
         `).get(draft.descricao, draft.detalhe, draft.valor, draft.data, draft.servico, draft.pagamento,
-            draft.recorrente ? 1 : 0, today, draft.custoMaterial === undefined ? 0 : 1, draft.custoMaterial ?? null, kind, id);
+            draft.recorrente ? 1 : 0, today, draft.custoMaterial === undefined ? 0 : 1, draft.custoMaterial ?? null, this.workspace, kind, id);
         return mapEntry(row!);
     }
 
     cancel(kind: Kind, id: number) {
-        this.db.prepare('UPDATE lancamentos SET cancelado = 1 WHERE tipo = ? AND id = ?').run(kind, id);
+        this.db.prepare('UPDATE lancamentos SET cancelado = 1 WHERE workspace = ? AND tipo = ? AND id = ?')
+            .run(this.workspace, kind, id);
     }
 
     syncRecurringExpenses(today: string) {
@@ -105,25 +122,25 @@ export class SqliteRepository implements Repository {
                 SELECT origem.id, max(date(origem.data, 'start of month', '+1 month'),
                     date(origem.recorrencia_desde, 'start of month'),
                     COALESCE((SELECT date(max(filha.data), 'start of month', '+1 month')
-                        FROM lancamentos filha WHERE filha.recorrencia_origem = origem.id),
+                        FROM lancamentos filha WHERE filha.workspace = origem.workspace AND filha.recorrencia_origem = origem.id),
                         date(origem.data, 'start of month', '+1 month')))
                 FROM lancamentos origem
-                WHERE origem.tipo = 'despesas' AND origem.recorrencia_desde IS NOT NULL AND origem.cancelado = 0
+                WHERE origem.workspace = ? AND origem.tipo = 'despesas' AND origem.recorrencia_desde IS NOT NULL AND origem.cancelado = 0
                 UNION ALL
                 SELECT id, date(mes, '+1 month') FROM cobrancas WHERE mes < date(?, 'start of month')
             ), vencimentos AS (
-                SELECT origem.id, origem.descricao, origem.detalhe, origem.valor, origem.servico, origem.recorrencia_desde,
+                SELECT origem.id, origem.workspace, origem.descricao, origem.detalhe, origem.valor, origem.servico, origem.recorrencia_desde,
                     printf('%s-%02d', substr(mes, 1, 7), min(CAST(substr(origem.data, 9, 2) AS INTEGER),
                         CAST(strftime('%d', date(mes, '+1 month', '-1 day')) AS INTEGER))) AS vencimento
                 FROM cobrancas JOIN lancamentos origem ON origem.id = cobrancas.id
                 WHERE mes <= date(?, 'start of month')
             )
-            INSERT INTO lancamentos (tipo, descricao, detalhe, valor, data, servico, recorrencia_origem)
-            SELECT 'despesas', descricao, detalhe, valor, vencimento, servico, id FROM vencimentos
+            INSERT INTO lancamentos (workspace, tipo, descricao, detalhe, valor, data, servico, recorrencia_origem)
+            SELECT workspace, 'despesas', descricao, detalhe, valor, vencimento, servico, id FROM vencimentos
             WHERE vencimento BETWEEN recorrencia_desde AND ?
             ORDER BY vencimento, id
             ON CONFLICT(recorrencia_origem, data) WHERE recorrencia_origem IS NOT NULL DO NOTHING
-        `).run(today, today, today);
+        `).run(this.workspace, today, today, today);
     }
 
     close() {

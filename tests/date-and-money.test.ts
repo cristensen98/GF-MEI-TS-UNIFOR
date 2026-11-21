@@ -14,5 +14,7 @@ test('mantém os centavos na exibição e na edição de valores aceitos pelo si
     assert.equal(cents(amountInput(amount)), amount);
     assert.equal(formatMoney(amount).split(',').at(-1), '90');
     assert.match(formatMoney(-1), /^-R\$\s0,01$/);
+    assert.match(formatMoney(-1n), /^-R\$\s0,01$/);
+    assert.equal(formatMoney(9_007_199_254_740_993n).split(',').at(-1), '93');
     assert.equal(amountInput(0), '0,00');
 });

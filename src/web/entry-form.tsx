@@ -15,7 +15,9 @@ interface Props {
 
 export function EntryForm({ kind, selected, services, save, close, busy }: Props) {
     const amount = useRef<HTMLInputElement>(null);
+    const materialAmount = useRef<HTMLInputElement>(null);
     const [amountError, setAmountError] = useState('');
+    const [materialError, setMaterialError] = useState('');
     const [error, setError] = useState('');
     const [baseText, setBaseText] = useState(selected ? amountInput(selected.valor) : '');
     const [materialText, setMaterialText] = useState(selected?.custoMaterial == null ? '' : amountInput(selected.custoMaterial));
@@ -45,6 +47,17 @@ export function EntryForm({ kind, selected, services, save, close, busy }: Props
             return;
         }
         setAmountError('');
+        let materialCents: number | null = null;
+        if (kind === 'servicos' && material) {
+            try {
+                materialCents = cents(material, 0);
+            } catch (problem) {
+                setMaterialError((problem as Error).message);
+                materialAmount.current?.focus();
+                return;
+            }
+        }
+        setMaterialError('');
         try {
             await save({
                 descricao: String(values.get('descricao')),
@@ -53,7 +66,7 @@ export function EntryForm({ kind, selected, services, save, close, busy }: Props
                 data: String(values.get('data')),
                 servico: service ? Number(service) : null,
                 pagamento: String(values.get('pagamento') || '') || null,
-                ...(kind === 'servicos' ? { custoMaterial: material ? cents(material, 0) : null } : {}),
+                ...(kind === 'servicos' ? { custoMaterial: materialCents } : {}),
                 ...(kind === 'despesas' && !selected?.recorrenciaOrigem ? {
                     recorrente: values.has('recorrente')
                 } : {})
@@ -79,9 +92,12 @@ export function EntryForm({ kind, selected, services, save, close, busy }: Props
                 <p id="amount-error" role="alert">{amountError}</p>
                 {kind === 'servicos' && <>
                     <label>Custo de materiais (R$, opcional)
-                        <input id="service-material" name="custoMaterial" inputMode="decimal" value={materialText}
-                            onChange={event => setMaterialText(event.target.value)} />
+                        <input ref={materialAmount} id="service-material" name="custoMaterial" inputMode="decimal" value={materialText}
+                            aria-invalid={materialError ? true : undefined}
+                            aria-describedby={materialError ? 'material-error' : undefined}
+                            onChange={event => { setMaterialError(''); setMaterialText(event.target.value); }} />
                     </label>
+                    <p id="material-error" role="alert">{materialError}</p>
                     <div className="service-price-total"><label htmlFor="service-total">Total do serviço</label>
                         <output id="service-total" htmlFor="service-base service-material">{preview}</output>
                     </div>

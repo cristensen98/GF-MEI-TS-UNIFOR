@@ -31,6 +31,11 @@ test('inclui meses anteriores à janela e reinicia o acumulado na virada do ano'
         { ...entry, id: 4, data: '2027-02-10' }
     ]);
     assert.deepEqual(revenue.map(point => [point.monthly, point.total]), [
-        [0, 11_000], [11_000, 22_000], [0, 0], [11_000, 11_000]
+        [0n, 11_000n], [11_000n, 22_000n], [0n, 0n], [11_000n, 11_000n]
     ]);
+    const large = recordedRevenue(['2026-01', '2026-02'], [
+        { ...entry, valor: Number.MAX_SAFE_INTEGER, custoMaterial: null },
+        { ...entry, id: 2, data: '2026-02-10', valor: 2, custoMaterial: null }
+    ]);
+    assert.equal(large[1].total, 9_007_199_254_740_993n);
 });

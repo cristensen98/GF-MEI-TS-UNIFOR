@@ -22,9 +22,12 @@ function centFraction(cents: number) {
     return String(Math.abs(cents % 100)).padStart(2, '0');
 }
 
-export function formatMoney(cents: number) {
-    const fraction = centFraction(cents);
-    return money.formatToParts(Math.trunc(cents / 100))
+export function formatMoney(cents: number | bigint) {
+    const fraction = typeof cents === 'bigint' ? centFraction(Number(cents % 100n)) : centFraction(cents);
+    const integer = typeof cents === 'bigint'
+        ? (cents < 0n && cents > -100n ? -0 : cents / 100n)
+        : Math.trunc(cents / 100);
+    return money.formatToParts(integer)
         .map(part => part.type === 'fraction' ? fraction : part.value).join('');
 }
 

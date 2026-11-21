@@ -6,7 +6,7 @@ import { SqliteRepository } from '../src/server/sqlite.ts';
 const databasePath = resolve(process.env.GFMEI_DB ?? 'data/gfmei.sqlite');
 mkdirSync(dirname(databasePath), { recursive: true });
 const database = new SqliteRepository(databasePath);
-const ledger = new Ledger(database);
+const ledger = new Ledger(database.forWorkspace('installation'));
 
 const services = [
     ['Identidade visual para cafeteria', 'Cafeteria Aurora', 280000, '2026-06-03'],
@@ -58,7 +58,7 @@ function addDays(date: string, days: number) {
 
 try {
     const existing = ['servicos', 'despesas', 'recebimentos'] as const;
-    if (existing.some(kind => ledger.list(kind).length > 0)) {
+    if (existing.some(kind => ledger.list(kind).length > 0 || database.list(kind).length > 0)) {
         throw new Error('O banco já contém lançamentos. A carga de demonstração não foi aplicada.');
     }
 

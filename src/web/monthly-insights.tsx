@@ -3,64 +3,50 @@ import type { Entry } from '../domain/model.ts';
 import { serviceTotal } from '../domain/model.ts';
 import { formatMoney, request } from './client.ts';
 import type { MonthSummary } from './summary.tsx';
-import { AnnualEvolution } from './annual-evolution.tsx';
 
 const percent = new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 });
 const palette = ['#087565', '#6746a4', '#195e89', '#a04d1b', '#85405e'];
 
-function monthsOfYear(month: string) {
-    return Array.from({ length: 12 }, (_, index) => month.slice(0, 4) + '-' + String(index + 1).padStart(2, '0'));
-}
+type ChartValues = [string, number | bigint][];
 
-function Donut({ title, values }: { title: string; values: [string, number][] }) {
-    const total = values.reduce((sum, [, value]) => sum + value, 0);
+function Donut({ title, values }: { title: string; values: ChartValues }) {
+    const total = values.reduce((sum, [, value]) => sum + BigInt(value), 0n);
+    const share = (value: number | bigint) => Number(value) / Number(total);
     let position = 0;
     const stops = values.map(([, value], index) => {
         const start = position;
-        position += value / total * 100;
+        position += share(value) * 100;
         return `${palette[index % palette.length]} ${start}% ${position}%`;
     });
     return <section className="dashboard-panel">
         <h3>{title}</h3>
-        {total > 0 ? <div className="donut-content">
+        {total > 0n ? <div className="donut-content">
             <div className="donut" aria-hidden="true" style={{ background: 'conic-gradient(' + stops.join(',') + ')' }}>
                 <strong>{formatMoney(total)}</strong>
             </div>
+            <p className="sr-only">Total: {formatMoney(total)}</p>
             <ul role="list">{values.map(([name, value], index) => <li key={name}>
                 <span className="series-key" aria-hidden="true" style={{ background: palette[index % palette.length] }} />
-                <span>{name}</span><strong>{formatMoney(value)} · {percent.format(value / total)}</strong>
+                <span>{name}</span><strong>{formatMoney(value)} · {percent.format(share(value))}</strong>
             </li>)}</ul>
         </div> : <p className="chart-empty">Sem valores para este período.</p>}
     </section>;
 }
 
 export function MonthlyInsights({ month, summary }: { month: string; summary: MonthSummary }) {
-    const months = monthsOfYear(month);
-    const referenceIndex = Number(month.slice(5)) - 1;
-    const [history, setHistory] = useState<MonthSummary[] | null>(null);
-    const [services, setServices] = useState<Entry[] | null>(null);
-    const [serviceValues, setServiceValues] = useState<[string, number][] | null>(null);
-    const [historyError, setHistoryError] = useState(false);
+    const [serviceValues, setServiceValues] = useState<ChartValues | null>(null);
     const [servicesError, setServicesError] = useState(false);
-    const [revenueError, setRevenueError] = useState(false);
 
     useEffect(() => {
         let active = true;
-        const otherMonths = monthsOfYear(month).filter(item => item !== month);
-        void Promise.all(otherMonths.map(item => request<MonthSummary>('resumo/' + item)))
-            .then(results => { if (active) setHistory(results); })
-            .catch(() => { if (active) setHistoryError(true); });
-        const serviceRequest = request<Entry[]>('servicos');
-        void serviceRequest.then(result => { if (active) setServices(result); })
-            .catch(() => { if (active) setRevenueError(true); });
-        void Promise.all([serviceRequest, request<Entry[]>('recebimentos')])
+        void Promise.all([request<Entry[]>('servicos'), request<Entry[]>('recebimentos')])
             .then(([services, receipts]) => {
                 if (!active) return;
                 const selected = services.filter(entry => !entry.cancelado && entry.data.startsWith(month + '-'));
                 const ids = new Set(selected.map(entry => entry.id));
-                const contracted = selected.reduce((sum, entry) => sum + serviceTotal(entry), 0);
+                const contracted = selected.reduce((sum, entry) => sum + BigInt(serviceTotal(entry)), 0n);
                 const paid = receipts.reduce((sum, entry) => !entry.cancelado && entry.servico !== null &&
-                    ids.has(entry.servico) && entry.data.slice(0, 7) <= month ? sum + entry.valor : sum, 0);
+                    ids.has(entry.servico) && entry.data.slice(0, 7) <= month ? sum + BigInt(entry.valor) : sum, 0n);
                 setServiceValues([['Recebido até o fim do mês', paid], ['Em aberto no fim do mês', contracted - paid]]);
             })
             .catch(() => { if (active) setServicesError(true); });
@@ -73,9 +59,6 @@ export function MonthlyInsights({ month, summary }: { month: string; summary: Mo
         categories.set(name, (categories.get(name) ?? 0) + entry.valor);
     }
     return <div className="monthly-insights">
-        <AnnualEvolution months={months} referenceIndex={referenceIndex}
-            cash={history && [...history.slice(0, referenceIndex), summary, ...history.slice(referenceIndex)]} services={services}
-            cashError={historyError} revenueError={revenueError} />
         <div className="dashboard-charts">
             <Donut title="Composição das despesas pagas" values={[...categories].sort((a, b) => b[1] - a[1])} />
             {serviceValues ? <Donut title="Recebimento dos serviços do mês" values={serviceValues} /> :
