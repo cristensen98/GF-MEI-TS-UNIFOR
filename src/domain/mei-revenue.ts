@@ -1,11 +1,25 @@
 import { serviceTotal } from './model.ts';
 import type { Entry } from './model.ts';
 
-// Full-year thresholds under LC 123/2006 and LC 238/2026, arts. 2 and 3.
-export function meiThresholds(year: number) {
-    if (year < 2018) return null;
-    const ceiling = year >= 2028 ? 14_000_000 : year === 2027 ? 11_000_000 : 8_100_000;
-    return { ceiling, excessBoundary: ceiling * 6 / 5, projected: year >= 2027 };
+const openingMonthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function parseOpeningMonth(openingMonth?: string | null) {
+    return openingMonth && openingMonthPattern.test(openingMonth) ? openingMonth : null;
+}
+
+// LC 123/2006, art. 18-A, and LC 238/2026, arts. 1–3 and 10.
+export function meiThresholds(year: number, openingMonth?: string | null) {
+    const opening = parseOpeningMonth(openingMonth);
+    const openingYear = opening ? Number(opening.slice(0, 4)) : null;
+    if (year < 2018 || (openingYear !== null && year < openingYear)) return null;
+
+    const annualCeiling = year >= 2028 ? 14_000_000 : year === 2027 ? 11_000_000 : 8_100_000;
+    const monthlyCeiling = year >= 2028 ? 1_166_667 : year === 2027 ? 916_667 : 675_000;
+    const proportional = opening !== null && year === openingYear;
+    const ceiling = proportional ? monthlyCeiling * (13 - Number(opening.slice(5))) : annualCeiling;
+
+    // The last whole cent at or below the exact 120% boundary.
+    return { ceiling, excessBoundary: Math.floor(ceiling * 6 / 5), projected: year >= 2027, proportional };
 }
 
 export function revenueBand(total: number | bigint, thresholds: NonNullable<ReturnType<typeof meiThresholds>>) {
@@ -14,7 +28,8 @@ export function revenueBand(total: number | bigint, thresholds: NonNullable<Retu
     return { label: 'Excesso acima de 20%', tone: 'cancelled' };
 }
 
-export function recordedRevenue(months: string[], services: Entry[]) {
+export function recordedRevenue(months: string[], services: Entry[], openingMonth?: string | null) {
+    const opening = parseOpeningMonth(openingMonth);
     const byMonth = new Map<string, bigint>();
     for (const service of services) {
         if (service.cancelado) continue;
@@ -29,7 +44,7 @@ export function recordedRevenue(months: string[], services: Entry[]) {
         for (let index = 1; index <= monthNumber; index++) {
             total += byMonth.get(month.slice(0, 4) + '-' + String(index).padStart(2, '0')) ?? 0n;
         }
-        const thresholds = meiThresholds(year);
+        const thresholds = opening && month < opening ? null : meiThresholds(year, opening);
         return { year, monthly: byMonth.get(month) ?? 0n, total, thresholds,
             band: thresholds && revenueBand(total, thresholds) };
     });

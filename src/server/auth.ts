@@ -274,6 +274,9 @@ export function auth(databasePath: string) {
         for (const { key } of profileImages) {
             if (req.body[key] === undefined && typeof existing[key] === 'string') profile[key] = existing[key];
         }
+        if (req.body.openingMonth === undefined && typeof existing.openingMonth === 'string') {
+            profile.openingMonth = existing.openingMonth;
+        }
         const stored = typeof existing.nomeEmpresa === 'string' ? { ...profile, nomeEmpresa: existing.nomeEmpresa } : profile;
         db.prepare(`
             INSERT INTO perfis (workspace, dados) VALUES (?, ?)

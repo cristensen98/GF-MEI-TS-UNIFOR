@@ -39,3 +39,48 @@ test('inclui meses anteriores à janela e reinicia o acumulado na virada do ano'
     ]);
     assert.equal(large[1].total, 9_007_199_254_740_993n);
 });
+
+test('usa os meses do ano da abertura a partir do próprio mês, inclusive', () => {
+    const july = meiThresholds(2026, '2026-07');
+    assert.ok(july);
+    assert.equal(july.proportional, true);
+    assert.equal(july.ceiling, 4_050_000);
+    assert.equal(july.excessBoundary, 4_860_000);
+    assert.equal(revenueBand(4_050_000n, july).label, 'Dentro do teto');
+    assert.equal(revenueBand(4_050_001n, july).label, 'Excesso de até 20%');
+    assert.equal(revenueBand(4_860_000n, july).label, 'Excesso de até 20%');
+    assert.equal(revenueBand(4_860_001n, july).label, 'Excesso acima de 20%');
+    assert.equal(meiThresholds(2026, '2026-01')?.ceiling, 8_100_000);
+    assert.equal(meiThresholds(2026, '2026-12')?.ceiling, 675_000);
+    assert.deepEqual(meiThresholds(2027, '2026-07'), meiThresholds(2027));
+    assert.deepEqual(meiThresholds(2026, null), meiThresholds(2026));
+    assert.equal(meiThresholds(2025, '2026-07'), null);
+});
+
+test('usa os valores mensais previstos em lei e compara apenas centavos inteiros', () => {
+    const july = meiThresholds(2027, '2027-07');
+    assert.ok(july);
+    assert.equal(july.projected, true);
+    assert.equal(july.ceiling, 5_500_002);
+    assert.equal(july.excessBoundary, 6_600_002);
+    assert.equal(revenueBand(6_600_002n, july).label, 'Excesso de até 20%');
+    assert.equal(revenueBand(6_600_003n, july).label, 'Excesso acima de 20%');
+    assert.equal(meiThresholds(2028, '2028-12')?.ceiling, 1_166_667);
+});
+
+test('não classifica o período anterior à abertura e mantém o histórico registrado', () => {
+    const entry: Entry = {
+        id: 1, descricao: 'Serviço', detalhe: null, data: '2026-06-10', valor: 100,
+        custoMaterial: null, servico: null, pagamento: null, cancelado: false
+    };
+    const points = recordedRevenue(['2025-12', '2026-06', '2026-07', '2027-01'], [
+        entry,
+        { ...entry, id: 2, data: '2026-07-10', valor: 4_999_900 }
+    ], '2026-07');
+    assert.deepEqual(points.map(point => point.total), [0n, 100n, 5_000_000n, 0n]);
+    assert.equal(points[0].thresholds, null);
+    assert.equal(points[1].band, null);
+    assert.equal(points[2].band?.label, 'Excesso acima de 20%');
+    assert.equal(points[3].thresholds?.proportional, false);
+    assert.equal(points[3].thresholds?.ceiling, 11_000_000);
+});

@@ -66,6 +66,23 @@ test('cadastro público cria uma sessão comum sem aprovação', async () => {
             assert.equal(invalid.status, 400);
         }
         assert.deepEqual(await (await fetch(base + 'profile', { headers: { Cookie: cookie } })).json(), saved);
+        assert.equal(saved.openingMonth, undefined);
+        const updateOpeningMonth = (openingMonth?: unknown) => fetch(base + 'profile', {
+            ...config, body: JSON.stringify({ ...profile, openingMonth })
+        });
+        for (const invalid of ['2026-7', '2026-13', '2026-00', '0000-07', '2026-07-15', '2026-07\n', 202607, null]) {
+            assert.equal((await updateOpeningMonth(invalid)).status, 400);
+        }
+        const withOpening = await updateOpeningMonth('2026-07');
+        assert.equal(withOpening.status, 200);
+        assert.equal((await withOpening.json()).openingMonth, '2026-07');
+        assert.equal((await (await fetch(base + 'profile', { headers: { Cookie: cookie } })).json()).openingMonth, '2026-07');
+        assert.equal((await (await updateOpeningMonth()).json()).openingMonth, '2026-07');
+        const cleared = await updateOpeningMonth('');
+        assert.equal(cleared.status, 200);
+        assert.deepEqual(await cleared.json(), saved);
+        assert.deepEqual(await (await fetch(base + 'profile', { headers: { Cookie: cookie } })).json(), saved);
+
         const photo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=';
         const changeImages = (images: { foto?: string; capa?: string }) => fetch(base + 'profile', {
             method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'application/json' },

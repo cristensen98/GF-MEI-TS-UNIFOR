@@ -143,7 +143,7 @@ function App() {
         }
     }
 
-    if (session) return <Workspace usuario={session.usuario}
+    if (session) return <Workspace key={session.usuario} usuario={session.usuario}
         exit={() => void logout()} exiting={busy} sessionError={error} />;
     return <main className="local-exit">
         <div className="brand"><span className="brand-mark" aria-hidden="true">GF</span><h1>GF-MEI</h1></div>
@@ -180,6 +180,7 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
     sessionError: string;
 }) {
     const [view, setView] = useState<View>('resumo');
+    const [openingMonth, setOpeningMonth] = useState<string>();
     const [month, setMonth] = useState(() => businessDate().slice(0, 7));
     const [entries, setEntries] = useState<Entry[]>([]);
     const [services, setServices] = useState<Entry[]>([]);
@@ -325,7 +326,8 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
                     <input id="workspace-search" type="search" value={query}
                         placeholder="Descrição, categoria ou cliente" onChange={event => setQuery(event.target.value)} />
                 </div>
-                <ProfileMenu username={usuario} exit={exit} exiting={exiting} busy={busy} />
+                <ProfileMenu username={usuario} exit={exit} exiting={exiting} busy={busy}
+                    onOpeningMonthChange={setOpeningMonth} />
             </div>
         </header>
         <main className="shell">
@@ -354,7 +356,7 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
             <p role="status">{notice}</p>
             <p role="status">{loading ? 'Carregando…' : ''}</p>
             {view === 'resumo' ? summary && <MonthlyReport summary={summary} month={month} /> :
-                view === 'evolucao' ? <AnnualEvolution key={annualMonth} month={annualMonth} /> : <>
+                view === 'evolucao' ? <AnnualEvolution key={annualMonth} month={annualMonth} openingMonth={openingMonth} /> : <>
                 {form && <Modal title={form.entry ? 'Editar ' + form.entry.descricao : newLabels[view]}
                     trigger={formTrigger.current} busy={busy} close={closeForm}>
                     <EntryForm kind={view} selected={form.entry} services={services}

@@ -14,11 +14,17 @@ const images = profileImages.map(image => ({
     ...image, label: image.key === 'foto' ? 'Foto de perfil' : 'Capa do perfil'
 }));
 
-const [nameField, cnpjField, companyField, emailField, phoneField, whatsappField, bioField] = profileFields;
+const [nameField, cnpjField, companyField, emailField, phoneField, whatsappField, bioField, openingMonthField] = profileFields;
 const profileGroups = [
-    { title: 'Dados do MEI', fields: [cnpjField, companyField] },
+    { title: 'Dados do MEI', fields: [cnpjField, companyField, openingMonthField] },
     { title: 'Contato', fields: [emailField, phoneField, whatsappField] }
 ];
+
+function fieldValue(profile: Profile, { key }: Field) {
+    const value = profile[key];
+    if (key !== 'openingMonth' || !value) return value;
+    return `${value.slice(5)}/${value.slice(0, 4)}`;
+}
 
 function Avatar({ source, name }: { source?: string; name: string }) {
     return <span className="user-avatar" aria-hidden="true">
@@ -125,11 +131,12 @@ function ProfileHero({ profile, displayName, edit, showName, photoControl, cover
     </div>;
 }
 
-export function ProfileMenu({ username, exit, exiting, busy }: {
+export function ProfileMenu({ username, exit, exiting, busy, onOpeningMonthChange }: {
     username: string;
     exit: () => void;
     exiting: boolean;
     busy: boolean;
+    onOpeningMonthChange: (openingMonth: string | undefined) => void;
 }) {
     const trigger = useRef<HTMLButtonElement>(null);
     const fieldTrigger = useRef<HTMLButtonElement>(null);
@@ -154,10 +161,14 @@ export function ProfileMenu({ username, exit, exiting, busy }: {
 
     useEffect(() => {
         let active = true;
-        void request<Profile>('auth/profile').then(result => { if (active) setProfile(result); })
+        void request<Profile>('auth/profile').then(result => {
+            if (!active) return;
+            setProfile(result);
+            onOpeningMonthChange(result.openingMonth);
+        })
             .catch(error => { if (active) setLoadError((error as Error).message); });
         return () => { active = false; };
-    }, [retry]);
+    }, [onOpeningMonthChange, retry]);
 
     function show(next: 'profile' | 'edit') {
         setOpen(false);
@@ -213,7 +224,9 @@ export function ProfileMenu({ username, exit, exiting, busy }: {
         setSaveError('');
         setSaving(true);
         try {
-            setProfile(await request<Profile>('auth/profile', 'PUT', { ...data, ...imageDraft }));
+            const result = await request<Profile>('auth/profile', 'PUT', { ...data, ...imageDraft });
+            setProfile(result);
+            onOpeningMonthChange(result.openingMonth);
             show('profile');
         } catch (error) {
             setSaveError((error as Error).message);
@@ -281,11 +294,13 @@ export function ProfileMenu({ username, exit, exiting, busy }: {
                     <p role="alert">{imageError && `${imageError.key === 'foto' ? 'Foto de perfil' : 'Capa'} · ${imageError.message}`}</p>
                     <div className="profile-edit-fields">
                         {profileFields.map(({ key, label, limit, type }) => <label key={key}
-                            className={type === 'textarea' ? 'profile-edit-bio' : undefined}>{label}
+                            className={type === 'textarea' ? 'profile-edit-bio' : undefined}>
+                            {label}{type === 'month' && ' (opcional)'}
                             {type === 'textarea'
                                 ? <textarea name={key} maxLength={limit} defaultValue={profile[key]} rows={4} readOnly={saving} />
-                                : <input name={key} type={type} maxLength={limit} defaultValue={profile[key]}
-                                    placeholder={key === 'cnpj' ? '00.000.000/0000-00' : undefined}
+                                : <input name={key} type={type} maxLength={type === 'month' ? undefined : limit}
+                                    defaultValue={profile[key] ?? ''}
+                                    placeholder={key === 'cnpj' ? '00.000.000/0000-00' : type === 'month' ? 'AAAA-MM' : undefined}
                                     readOnly={saving} />}
                         </label>)}
                     </div>
@@ -296,7 +311,7 @@ export function ProfileMenu({ username, exit, exiting, busy }: {
                     </div>
                 </form> : <>
                     {field && <div className="profile-field-detail">
-                        <p>{profile[field.key] || (field.key === 'nomeExibicao' ? displayName : 'Não informado')}</p>
+                        <p>{fieldValue(profile, field) || (field.key === 'nomeExibicao' ? displayName : 'Não informado')}</p>
                         <button type="button" onClick={closeField}>Voltar ao perfil</button>
                     </div>}
                     <div hidden={Boolean(field)}>
@@ -315,7 +330,7 @@ export function ProfileMenu({ username, exit, exiting, busy }: {
                                     <ul role="list">{group.fields.map(item => <li key={item.key}>
                                         <button type="button" onClick={event => showField(item, event)}>
                                             <span>{item.label}</span>
-                                            <strong>{profile[item.key] || 'Não informado'}</strong>
+                                            <strong>{fieldValue(profile, item) || 'Não informado'}</strong>
                                         </button>
                                     </li>)}</ul>
                                 </section>)}

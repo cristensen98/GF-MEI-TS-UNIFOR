@@ -30,13 +30,14 @@ function axisTicks(low: bigint, high: bigint) {
     return Array.from({ length: Number((last - first) / step) + 1 }, (_, index) => first + BigInt(index) * step);
 }
 
-function EvolutionChart({ months, selected, series, revenue, onSelect }: {
+function EvolutionChart({ months, selected, series, revenue, referenceOnly, onSelect }: {
     months: string[]; selected: number; series: Series[]; revenue: Revenue | null;
+    referenceOnly: boolean;
     onSelect: (index: number) => void;
 }) {
     const gradientId = useId();
-    const ceiling = { label: 'Teto do MEI', color: 'var(--chart-limit)', dash: '6 4' };
-    const boundary = { label: 'Teto + 20%', color: 'var(--chart-excess)', dash: '2 4' };
+    const ceiling = { label: referenceOnly ? 'Teto anual de referência' : 'Teto do MEI', color: 'var(--chart-limit)', dash: '6 4' };
+    const boundary = { label: referenceOnly ? 'Referência anual + 20%' : 'Teto + 20%', color: 'var(--chart-excess)', dash: '2 4' };
     const guides = revenue?.some(point => point.thresholds) ? [ceiling, boundary] : [];
     const data = series.flatMap(item => item.values.map(value => BigInt(value)));
     const limits = revenue?.map(point => BigInt(point.thresholds?.excessBoundary ?? 0)) ?? [];
@@ -119,7 +120,7 @@ function monthsOfYear(year: string) {
     return Array.from({ length: 12 }, (_, index) => year + '-' + String(index + 1).padStart(2, '0'));
 }
 
-export function AnnualEvolution({ month }: { month: string }) {
+export function AnnualEvolution({ month, openingMonth }: { month: string; openingMonth?: string }) {
     const year = month.slice(0, 4);
     const months = monthsOfYear(year);
     const [selected, setSelected] = useState(Number(month.slice(5)) - 1);
@@ -146,11 +147,16 @@ export function AnnualEvolution({ month }: { month: string }) {
         return () => { active = false; };
     }, [cash, fiscal, year]);
 
-    const revenue = services && recordedRevenue(months, services);
+    const revenue = services && recordedRevenue(months, services, openingMonth);
+    const referenceOnly = !openingMonth;
     const wholeYear = selected === -1;
+    const selectedMonth = months[wholeYear ? months.length - 1 : selected];
     const selectedRevenue = revenue?.[wholeYear ? revenue.length - 1 : selected];
+    const beforeOpening = Boolean(openingMonth && selectedMonth < openingMonth);
     const thresholds = selectedRevenue?.thresholds;
     const room = selectedRevenue && thresholds ? BigInt(thresholds.ceiling) - selectedRevenue.total : null;
+    const ceilingLabel = thresholds?.proportional ? 'Teto proporcional' : referenceOnly
+        ? 'Teto anual de referência' : 'Teto do ano completo';
     const activeRevenue = fiscal ? revenue : null;
     const series = fiscal
         ? revenue && [{ label: 'Faturamento acumulado no ano', color: 'var(--income)', values: revenue.map(point => point.total) }]
@@ -181,21 +187,26 @@ export function AnnualEvolution({ month }: { month: string }) {
                 <dl className="monthly-deltas">
                     <div><dt>{wholeYear ? `Faturamento em ${year}` : `Faturamento até ${label(months[selected])}`}</dt>
                         <dd>{formatMoney(selectedRevenue.total)}</dd></div>
-                    {thresholds && <div><dt>{thresholds.projected ? 'Teto anual previsto' : 'Teto do ano completo'}</dt>
+                    {thresholds && <div><dt>{ceilingLabel}{thresholds.projected ? ' (previsto)' : ''}</dt>
                         <dd>{formatMoney(thresholds.ceiling)}</dd></div>}
-                    {room !== null && <div><dt>{room < 0 ? 'Excedente sobre o teto' : 'Margem até o teto'}</dt>
+                    {room !== null && <div><dt>{room < 0 ? 'Excedente sobre o teto' : 'Margem até o teto'}{referenceOnly ? ' de referência' : ''}</dt>
                         <dd>{formatMoney(room < 0n ? -room : room)}</dd></div>}
                 </dl>
                 <div className="revenue-alert">
-                {selectedRevenue.band && <span className="entry-status" data-tone={selectedRevenue.band.tone}>
-                    {selectedRevenue.band.label}
-                </span>}
-                {selectedRevenue.thresholds && <p className="muted">
-                    {selectedRevenue.thresholds.projected ? 'Faixas previstas para o ano completo' : 'Faixas do ano completo'} · Teto de {formatMoney(selectedRevenue.thresholds.ceiling)}
-                    {' · Teto + 20% de '}{formatMoney(selectedRevenue.thresholds.excessBoundary)}
+                {selectedRevenue.band && (referenceOnly
+                    ? <span className="entry-status">Apenas referência anual: {selectedRevenue.band.label}</span>
+                    : <span className="entry-status" data-tone={selectedRevenue.band.tone}>{selectedRevenue.band.label}</span>)}
+                {thresholds && <p className="muted">
+                    {ceilingLabel}{thresholds.projected ? ' (previsto)' : ''}: {formatMoney(thresholds.ceiling)}
+                    {' · Teto + 20%: '}{formatMoney(thresholds.excessBoundary)}
                 </p>}
-                {selectedRevenue.thresholds?.projected && <p className="muted">Ampliação sujeita à condição orçamentária da LC 238/2026.</p>}
-                {!selectedRevenue.thresholds && <p className="muted">Faixas de referência disponíveis a partir de 2018.</p>}
+                {referenceOnly && thresholds && <p className="muted">
+                    Informe o mês de abertura em Editar perfil para calcular o teto do primeiro ano.
+                </p>}
+                {thresholds?.projected && <p className="muted">Ampliação sujeita à condição orçamentária da LC 238/2026.</p>}
+                {!thresholds && <p className="muted">{beforeOpening
+                    ? 'Não há faixa aplicável antes do mês de abertura.'
+                    : 'Faixas de referência disponíveis a partir de 2018.'}</p>}
                 <p className="muted">Estimativa pelos serviços cadastrados, na data do serviço. O acumulado reinicia em janeiro. No ano de abertura, o teto é proporcional aos meses de atividade.</p>
                 </div>
             </div>}
@@ -203,14 +214,14 @@ export function AnnualEvolution({ month }: { month: string }) {
                 <div key={item.label}><dt>{item.label}{wholeYear ? ` em ${year}` : ''}</dt>
                     <dd>{formatMoney(item.selectedValue)}</dd></div>)}</dl>}
             <EvolutionChart months={months} selected={selected} series={series} revenue={activeRevenue}
-                onSelect={setSelected} />
+                referenceOnly={referenceOnly} onSelect={setSelected} />
             <section className="annual-information" aria-labelledby="annual-values-heading">
                 <h4 id="annual-values-heading">Valores dos {months.length} meses</h4>
                 <div className="table-scroll" role="region" aria-label="Valores da evolução anual" tabIndex={0}>
                     <table className="chart-table annual-values-table">
                         <caption>{fiscal ? 'Faturamento registrado e faixa de referência' : 'Fluxo de caixa mensal'}</caption>
                         <thead><tr><th scope="col">Mês</th>{fiscal
-                            ? <><th scope="col">No mês</th><th scope="col">Acumulado no ano</th><th scope="col">Faixa de referência</th></>
+                            ? <><th scope="col">No mês</th><th scope="col">Acumulado no ano</th><th scope="col">{referenceOnly ? 'Comparação com o teto anual de referência' : 'Faixa de referência'}</th></>
                             : series.map(item => <th key={item.label} scope="col">{item.label}</th>)}</tr></thead>
                         <tbody>{months.map((month, index) => <tr key={month}><th scope="row">{label(month)}</th>
                             {activeRevenue

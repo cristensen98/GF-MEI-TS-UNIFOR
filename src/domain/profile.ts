@@ -7,7 +7,8 @@ export const profileFields = [
     { key: 'email', label: 'E-mail', limit: 254, type: 'email' },
     { key: 'telefone', label: 'Telefone', limit: 40, type: 'tel' },
     { key: 'whatsapp', label: 'WhatsApp', limit: 40, type: 'tel' },
-    { key: 'bio', label: 'Bio', limit: 1000, type: 'textarea' }
+    { key: 'bio', label: 'Bio', limit: 1000, type: 'textarea' },
+    { key: 'openingMonth', label: 'Mês e ano de abertura do MEI', limit: 7, type: 'month' }
 ] as const;
 
 export const maxProfilePhotoBytes = 256 * 1024;
@@ -43,6 +44,14 @@ export function parseProfile(input: unknown): Profile {
     const profile: Profile = {};
     for (const { key, label, limit, type } of profileFields) {
         const value = fields[key];
+        if (key === 'openingMonth') {
+            if (value === undefined || value === '') continue;
+            if (typeof value !== 'string' || value.length !== limit || !/^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$/.test(value)) {
+                throw new DomainError('Informe o mês e o ano de abertura do MEI no formato AAAA-MM.');
+            }
+            profile.openingMonth = value;
+            continue;
+        }
         if (typeof value !== 'string' || value.trim().length > limit) {
             throw new DomainError(`Informe um valor válido para ${label} (até ${limit} caracteres).`);
         }

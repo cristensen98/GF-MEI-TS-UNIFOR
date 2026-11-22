@@ -35,6 +35,10 @@ O domínio depende do contrato `Repository`. A implementação SQLite é escolhi
 
 Para serviços, despesas e recebimentos, a API expõe `POST /api/{recurso}`, `GET /api/{recurso}`, `GET /api/{recurso}/{id}`, `PUT /api/{recurso}/{id}` e `DELETE /api/{recurso}/{id}`. O DELETE cancela o lançamento e preserva o histórico. O resumo mensal é consultado em `GET /api/resumo/AAAA-MM`.
 
+## Evolução anual
+
+No menu do usuário, informe o mês de abertura em **Editar perfil** para calcular o teto proporcional no primeiro ano. O mês da abertura conta integralmente. Sem essa informação, a tela mostra apenas uma comparação com o teto do ano completo.
+
 ## Testes
 
 Execute `npm test`. Os testes usam o executor nativo do Node.js e o SQLite em memória ou em um arquivo temporário. Cobrem valores inválidos, edição, recebimentos parciais, cancelamento, resultado mensal e persistência.
