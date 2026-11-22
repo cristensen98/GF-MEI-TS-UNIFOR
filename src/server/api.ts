@@ -28,6 +28,9 @@ export function api(forWorkspace: (workspace: string) => Ledger) {
     router.get('/resumo/:mes', (req, res) => {
         res.json((res.locals.ledger as Ledger).monthlySummary(req.params.mes));
     });
+    router.get('/resumo/anual/:ano', (req, res) => {
+        res.json((res.locals.ledger as Ledger).annualCashSummary(req.params.ano));
+    });
     router.get('/servicos/:id/resumo', (req, res) => {
         res.json((res.locals.ledger as Ledger).serviceSummary(parseId(req.params.id)));
     });

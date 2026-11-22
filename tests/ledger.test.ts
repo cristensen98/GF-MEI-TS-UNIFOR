@@ -37,6 +37,25 @@ test('gera despesas mensais uma vez, ajusta o vencimento e contabiliza somente o
     assert.equal(ledger.monthlySummary('2026-01').saidas, expense.valor);
 });
 
+test('o caixa anual usa as datas efetivas e os mesmos totais do resumo mensal', t => {
+    const ledger = fixture(t);
+    const entry = ledger.save('servicos', service);
+    ledger.save('recebimentos', { ...receipt, servico: entry.id, data: '2026-01-01' });
+    ledger.save('recebimentos', { ...receipt, servico: entry.id, data: '2027-01-01' });
+    const cancelled = ledger.save('despesas', { ...expense, pagamento: '2026-12-31' });
+    ledger.cancel('despesas', cancelled.id);
+    ledger.save('despesas', { ...expense, data: '2025-12-31', pagamento: '2026-01-01' });
+    ledger.save('despesas', expense);
+    const year = ledger.annualCashSummary('2026');
+    assert.deepEqual(year[0], { entradas: receipt.valor, saidas: expense.valor, resultado: receipt.valor - expense.valor });
+    assert.deepEqual(year[11], { entradas: 0, saidas: 0, resultado: 0 });
+    for (let index = 0; index < year.length; index++) {
+        const month = '2026-' + String(index + 1).padStart(2, '0');
+        const { entradas, saidas, resultado } = ledger.monthlySummary(month);
+        assert.deepEqual(year[index], { entradas, saidas, resultado });
+    }
+});
+
 test('usa materiais como custo direto sem duplicar despesas vinculadas', t => {
     const ledger = fixture(t);
     const entry = ledger.save('servicos', { ...service, custoMaterial: 4250 });

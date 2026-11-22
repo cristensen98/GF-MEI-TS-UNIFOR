@@ -58,6 +58,12 @@ test('isola consultas e alterações por MEI, inclusive para o administrador', a
         }
         assert.equal((await (await fetch(base + '/primeiro/resumo/2026-11')).json()).entradas, 10000);
         assert.equal((await (await fetch(base + '/segundo/resumo/2026-11')).json()).entradas, 0);
+        const annual = await (await fetch(base + '/primeiro/resumo/anual/2026')).json();
+        assert.equal(annual.length, 12);
+        assert.deepEqual(annual[10], { entradas: 10000, saidas: 0, resultado: 10000 });
+        const otherAnnual = await (await fetch(base + '/segundo/resumo/anual/2026')).json();
+        assert.deepEqual(otherAnnual, Array.from({ length: 12 }, () => ({ entradas: 0, saidas: 0, resultado: 0 })));
+        assert.equal((await fetch(base + '/primeiro/resumo/anual/invalido')).status, 400);
         assert.equal((await fetch(base + '/primeiro/servicos/' + id, {
             method: 'PUT', headers: json, body: JSON.stringify({ ...draft, descricao: 'Editado' })
         })).status, 200);

@@ -106,10 +106,33 @@ export class Ledger {
         const datePrefix = month + '-';
         const recebimentos = this.list('recebimentos').filter(entry => !entry.cancelado && entry.data.startsWith(datePrefix));
         const despesas = this.list('despesas').filter(entry => !entry.cancelado && entry.pagamento?.startsWith(datePrefix));
-        const entradas = total(recebimentos);
-        const saidas = total(despesas);
-        return { entradas, saidas, resultado: entradas - saidas, recebimentos, despesas };
+        return { ...cashTotals(recebimentos, despesas), recebimentos, despesas };
     }
+
+    annualCashSummary(year: string) {
+        if (!/^\d{4}$/.test(year)) throw new DomainError('Informe o ano no formato AAAA.');
+
+        const months = Array.from({ length: 12 }, () => ({
+            receipts: [] as Entry[], expenses: [] as Entry[]
+        }));
+        for (const receipt of this.list('recebimentos')) {
+            if (!receipt.cancelado && receipt.data.startsWith(year + '-')) {
+                months[Number(receipt.data.slice(5, 7)) - 1].receipts.push(receipt);
+            }
+        }
+        for (const expense of this.list('despesas')) {
+            if (!expense.cancelado && expense.pagamento?.startsWith(year + '-')) {
+                months[Number(expense.pagamento.slice(5, 7)) - 1].expenses.push(expense);
+            }
+        }
+        return months.map(({ receipts, expenses }) => cashTotals(receipts, expenses));
+    }
+}
+
+function cashTotals(receipts: Entry[], expenses: Entry[]) {
+    const entradas = total(receipts);
+    const saidas = total(expenses);
+    return { entradas, saidas, resultado: entradas - saidas };
 }
 
 function total(entries: Entry[]) {

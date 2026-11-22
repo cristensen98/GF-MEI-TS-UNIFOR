@@ -4,6 +4,8 @@ import { recordedRevenue } from '../domain/mei-revenue.ts';
 import { formatMoney, request } from './client.ts';
 import type { MonthSummary } from './summary.tsx';
 
+type CashTotals = Pick<MonthSummary, 'entradas' | 'saidas' | 'resultado'>;
+
 const metrics = [
     { key: 'entradas', label: 'Entradas', color: 'var(--cash-in)' },
     { key: 'saidas', label: 'Despesas pagas', color: 'var(--cash-out)' },
@@ -125,7 +127,7 @@ export function AnnualEvolution({ month, openingMonth }: { month: string; openin
     const months = monthsOfYear(year);
     const [selected, setSelected] = useState(Number(month.slice(5)) - 1);
     const [fiscal, setFiscal] = useState(true);
-    const [cash, setCash] = useState<MonthSummary[] | null>(null);
+    const [cash, setCash] = useState<CashTotals[] | null>(null);
     const [services, setServices] = useState<Entry[] | null>(null);
     const [cashError, setCashError] = useState(false);
     const [revenueError, setRevenueError] = useState(false);
@@ -141,7 +143,7 @@ export function AnnualEvolution({ month, openingMonth }: { month: string; openin
         if (fiscal || cash) return;
         let active = true;
         setCashError(false);
-        void Promise.all(monthsOfYear(year).map(item => request<MonthSummary>('resumo/' + item)))
+        void request<CashTotals[]>('resumo/anual/' + year)
             .then(result => { if (active) setCash(result); })
             .catch(() => { if (active) setCashError(true); });
         return () => { active = false; };

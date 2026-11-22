@@ -114,8 +114,10 @@ export function auth(databasePath: string) {
     router.use((req, res, next) => {
         res.set('Cache-Control', 'no-store');
         const origin = req.get('Origin');
-        if (req.method !== 'GET' && req.method !== 'HEAD' && origin &&
-            origin !== req.protocol + '://' + req.get('Host')) {
+        const site = req.get('Sec-Fetch-Site');
+        const foreignOrigin = origin !== undefined && origin !== req.protocol + '://' + req.get('Host');
+        if (req.method !== 'GET' && req.method !== 'HEAD' &&
+            (foreignOrigin || site === 'cross-site' || site === 'same-site')) {
             res.status(403).json({ erro: 'Origem da solicitação inválida.' });
             return;
         }

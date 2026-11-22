@@ -357,8 +357,26 @@ main.shell { min-width: 0; }
 .user-avatar { display: grid; place-items: center; width: 2.5rem; aspect-ratio: 1; background: #e1f2ec; color: #145443; border-radius: 50%; font-weight: 750; }
 .sidebar-exit { background: transparent; color: #ecf4fa; border-color: #7a91a6; }
 .sidebar-exit:hover:not(:disabled):not([aria-disabled="true"]) { background: #38383f; }
-.local-exit { grid-column: 1 / -1; align-self: start; width: min(28rem, calc(100% - 2rem)); margin: 12vh auto 2rem; padding: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 1rem; }
+#root:has(> .local-exit) { display: flow-root; background: var(--sidebar); }
+.local-exit {
+    color-scheme: dark;
+    width: min(28rem, calc(100% - 2rem));
+    margin: clamp(2rem, 12vh, 6rem) auto 2rem;
+    padding: 1.5rem;
+    color: #ecf4fa;
+    background: var(--sidebar);
+    border: 1px solid #55555f;
+    border-radius: 1rem;
+}
 .local-exit p { margin-block: .5rem 1rem; }
+.local-exit :is(.muted, [role="status"]) { color: #c2d3df; }
+.local-exit [role="alert"] { color: #ffb4b2; }
+.local-exit :is(input, button) { border-color: #7c8299; background: #303038; }
+.local-exit .password-control button { background: transparent; }
+.local-exit button:hover:not(:disabled) { background: #38383f; }
+.local-exit button[type="submit"] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.local-exit button[type="submit"]:hover:not(:disabled) { background: var(--accent-hover); }
+.local-exit :focus-visible { outline-color: var(--accent); }
 @media (min-width: 54rem) {
     .site-header .shell { min-height: 100vh; grid-template-rows: auto 1fr auto; }
     .site-header nav { align-content: start; }
