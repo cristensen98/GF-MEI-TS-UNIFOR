@@ -5,6 +5,8 @@ import type { Profile } from '../domain/profile.ts';
 import { request } from './client.ts';
 import { Modal } from './modal.tsx';
 import { PasswordDialog } from './password-dialog.tsx';
+import { setTheme } from './theme.ts';
+import type { Theme } from './theme.ts';
 
 type Field = (typeof profileFields)[number];
 type ImageKey = (typeof profileImages)[number]['key'];
@@ -133,6 +135,8 @@ export function ProfileMenu({ username, exit, exiting, busy }: {
     const fieldTrigger = useRef<HTMLButtonElement>(null);
     const menuId = useId();
     const [open, setOpen] = useState(false);
+    const [theme, updateTheme] = useState<Theme>(() =>
+        document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
     const [dialog, setDialog] = useState<'profile' | 'edit' | null>(null);
     const [passwordOpen, setPasswordOpen] = useState(false);
     const [field, setField] = useState<Field | null>(null);
@@ -247,6 +251,17 @@ export function ProfileMenu({ username, exit, exiting, busy }: {
                 setOpen(false);
                 setPasswordOpen(true);
             }}>Alterar senha</button>
+            <div className="profile-theme">
+                <button type="button" className="profile-theme-switch" role="switch" aria-checked={theme === 'dark'}
+                    onClick={() => {
+                        const nextTheme = theme === 'dark' ? 'light' : 'dark';
+                        setTheme(nextTheme);
+                        updateTheme(nextTheme);
+                    }}>
+                    <span lang="en">Dark mode</span>
+                    <span className="profile-theme-track" aria-hidden="true" />
+                </button>
+            </div>
             <button type="button" disabled={busy || exiting} onClick={() => { setOpen(false); exit(); }}>
                 {exiting ? 'Saindo…' : 'Sair'}
             </button>

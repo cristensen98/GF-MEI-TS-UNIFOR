@@ -16,10 +16,28 @@ import { Modal } from './modal.tsx';
 import { dateLabel, MonthlyReport, ServiceReport } from './summary.tsx';
 import type { MonthSummary, ServiceSummary } from './summary.tsx';
 import './style.css';
+import { initializeTheme } from './theme.ts';
 
 const labels = { servicos: 'Serviços', despesas: 'Despesas', recebimentos: 'Recebimentos' };
 const newLabels = { servicos: 'Novo serviço', despesas: 'Nova despesa', recebimentos: 'Novo recebimento' };
 type View = Kind | 'resumo' | 'evolucao';
+
+const sidebarIconPaths = {
+    resumo: 'M3 10.5 12 3l9 7.5M5 9v11h5v-6h4v6h5V9',
+    evolucao: 'M3 3v18h18M7 15l4-4 4 2 5-6m-4 0h4v4',
+    servicos: 'M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm0 4h18m-11 0v2h4v-2',
+    despesas: 'M5 3l2.5 2L10 3l2 2 2-2 2.5 2L19 3v18l-2.5-2L14 21l-2-2-2 2-2.5-2L5 21zm4 9h6',
+    recebimentos: 'M12 3v11m-4-4 4 4 4-4M4 14v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5',
+    sair: 'M10 17l5-5-5-5m5 5H3m11-8h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5'
+};
+
+function SidebarIcon({ name }: { name: View | 'sair' }) {
+    return <svg aria-hidden="true" focusable="false" width="20" height="20" viewBox="0 0 24 24"
+        className="sidebar-icon" fill="none" stroke="currentColor" strokeWidth="1.7"
+        strokeLinecap="round" strokeLinejoin="round">
+        <path d={sidebarIconPaths[name]} />
+    </svg>;
+}
 
 function entryStatus(kind: Kind, entry: Entry) {
     if (entry.cancelado) return 'Cancelado';
@@ -290,9 +308,13 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
                         <button key={page} aria-current={page === view ? 'page' : undefined}
                             aria-disabled={busy || undefined} onClick={() => changeView(page)}>
                             {pages[page]}
+                            <SidebarIcon name={page} />
                         </button>)}
                 </nav>
-                <button type="button" className="sidebar-exit" disabled={busy || exiting} onClick={exit}>{exiting ? 'Saindo…' : 'Sair'}</button>
+                <button type="button" className="sidebar-exit" disabled={busy || exiting} onClick={exit}>
+                    {exiting ? 'Saindo…' : 'Sair'}
+                    <SidebarIcon name="sair" />
+                </button>
             </div>
         </header>
         <div className="workspace">
@@ -409,5 +431,6 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
     </>;
 }
 
+initializeTheme();
 createRoot(document.getElementById('root')!).render(<App />);
 

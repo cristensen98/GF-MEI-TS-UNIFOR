@@ -5,11 +5,18 @@ import { formatMoney, request } from './client.ts';
 import type { MonthSummary } from './summary.tsx';
 
 const percent = new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 });
-const palette = ['#087565', '#6746a4', '#195e89', '#a04d1b', '#85405e'];
+const categoryPalette = [
+    'var(--overview-category-blue, var(--income))',
+    'var(--overview-category-cyan, var(--expenses))',
+    'var(--overview-category-gold, var(--cash-result))',
+    'var(--overview-category-pink, var(--chart-cyan))',
+    'var(--overview-category-slate, var(--chart-magenta))'
+];
+const receiptPalette = ['var(--overview-income, var(--income))', 'var(--overview-pending, var(--expenses))'];
 
 type ChartValues = [string, number | bigint][];
 
-function Donut({ title, values }: { title: string; values: ChartValues }) {
+function Donut({ title, values, palette }: { title: string; values: ChartValues; palette: string[] }) {
     const total = values.reduce((sum, [, value]) => sum + BigInt(value), 0n);
     const share = (value: number | bigint) => Number(value) / Number(total);
     let position = 0;
@@ -60,8 +67,9 @@ export function MonthlyInsights({ month, summary }: { month: string; summary: Mo
     }
     return <div className="monthly-insights">
         <div className="dashboard-charts">
-            <Donut title="Composição das despesas pagas" values={[...categories].sort((a, b) => b[1] - a[1])} />
-            {serviceValues ? <Donut title="Recebimento dos serviços do mês" values={serviceValues} /> :
+            <Donut title="Composição das despesas pagas" palette={categoryPalette}
+                values={[...categories].sort((a, b) => b[1] - a[1])} />
+            {serviceValues ? <Donut title="Recebimento dos serviços do mês" palette={receiptPalette} values={serviceValues} /> :
                 <section className="dashboard-panel"><h3>Recebimento dos serviços do mês</h3>
                     <p role="status">{servicesError ? 'Não foi possível carregar os serviços.' : 'Carregando serviços…'}</p>
                 </section>}

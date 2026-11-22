@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { Entry } from '../domain/model.ts';
 import { recordedRevenue } from '../domain/mei-revenue.ts';
 import { formatMoney, request } from './client.ts';
 import type { MonthSummary } from './summary.tsx';
 
 const metrics = [
-    { key: 'entradas', label: 'Entradas', color: '#087565' },
-    { key: 'saidas', label: 'Despesas pagas', color: '#6746a4' },
-    { key: 'resultado', label: 'Resultado de caixa', color: '#193c64' }
+    { key: 'entradas', label: 'Entradas', color: 'var(--cash-in)' },
+    { key: 'saidas', label: 'Despesas pagas', color: 'var(--cash-out)' },
+    { key: 'resultado', label: 'Resultado de caixa', color: 'var(--primary)' }
 ] as const;
 const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 const label = (month: string) => monthName.format(new Date(month + '-01T00:00:00Z'));
@@ -15,52 +15,104 @@ const label = (month: string) => monthName.format(new Date(month + '-01T00:00:00
 type Revenue = ReturnType<typeof recordedRevenue>;
 type Series = { label: string; color: string; values: (number | bigint)[] };
 
-function EvolutionChart({ months, selected, series, revenue }: {
+const monthShort = new Intl.DateTimeFormat('pt-BR', { month: 'short', timeZone: 'UTC' });
+const compactAxis = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
+const axisLabel = (cents: bigint) => Math.abs(Number(cents)) >= 100_000
+    ? `R$ ${compactAxis.format(Number(cents) / 100)}`
+    : formatMoney(cents);
+
+function axisTicks(low: bigint, high: bigint) {
+    const interval = (high - low + 3n) / 4n;
+    const magnitude = 10n ** BigInt(interval.toString().length - 1);
+    const step = [1n, 2n, 5n, 10n].map(factor => factor * magnitude).find(value => value >= interval)!;
+    const first = (low - step + 1n) / step * step;
+    const last = (high + step - 1n) / step * step;
+    return Array.from({ length: Number((last - first) / step) + 1 }, (_, index) => first + BigInt(index) * step);
+}
+
+function EvolutionChart({ months, selected, series, revenue, onSelect }: {
     months: string[]; selected: number; series: Series[]; revenue: Revenue | null;
+    onSelect: (index: number) => void;
 }) {
-    const ceiling = { label: 'Teto do MEI', color: '#895514', dash: '6 4' };
-    const boundary = { label: 'Teto + 20%', color: '#991b1b', dash: '2 4' };
+    const gradientId = useId();
+    const ceiling = { label: 'Teto do MEI', color: 'var(--chart-limit)', dash: '6 4' };
+    const boundary = { label: 'Teto + 20%', color: 'var(--chart-excess)', dash: '2 4' };
     const guides = revenue?.some(point => point.thresholds) ? [ceiling, boundary] : [];
-    const seriesDashes = [undefined, '8 4', '2 4'];
     const data = series.flatMap(item => item.values.map(value => BigInt(value)));
     const limits = revenue?.map(point => BigInt(point.thresholds?.excessBoundary ?? 0)) ?? [];
     const min = data.reduce((lowest, value) => value < lowest ? value : lowest, 0n);
-    const max = [...data, ...limits].reduce((highest, value) => value > highest ? value : highest, min + 100n);
-    const step = 600 / months.length;
-    const x = (index: number) => 18 + step * (index + .5);
-    const y = (value: number | bigint) => 12 + Number(max - BigInt(value)) / Number(max - min) * 143;
+    const max = [...data, ...limits].reduce((highest, value) => value > highest ? value : highest,
+        min < -100n ? 0n : min + 100n);
+    const ticks = axisTicks(min, max);
+    const axisMin = ticks[0];
+    const axisMax = ticks[ticks.length - 1];
+    const left = 98;
+    const right = 736;
+    const top = 22;
+    const bottom = 242;
+    const step = (right - left) / months.length;
+    const x = (index: number) => left + step * (index + .5);
+    const y = (value: number | bigint) =>
+        top + Number(axisMax - BigInt(value)) / Number(axisMax - axisMin) * (bottom - top);
+    const paths = series.map(item => item.values.map((value, index) =>
+        `${index === 0 ? 'M' : 'L'}${x(index)} ${y(value)}`).join(' '));
 
-    return <>
-        <div className="annual-legend" aria-hidden="true">
-            {[...series.map((item, index) => ({ ...item, dash: seriesDashes[index] })), ...guides].map(item =>
-                <span key={item.label}><svg width="23" height="10" viewBox="0 0 23 10">
-                    <line x1="0" x2="23" y1="5" y2="5" stroke={item.color} strokeWidth="2.5" strokeDasharray={item.dash} />
+    return <div className="annual-chart-card">
+        <div className="annual-legend">
+            {[...series, ...guides].map(item =>
+                <span key={item.label}><svg aria-hidden="true" width="23" height="10" viewBox="0 0 23 10">
+                    <line x1="0" x2="23" y1="5" y2="5" stroke={item.color} strokeWidth="2.5"
+                        strokeDasharray={'dash' in item ? item.dash : undefined} />
                 </svg>{item.label}</span>)}
         </div>
-        <div className="evolution-chart" aria-hidden="true">
-            <div className="chart-axis"><span>{formatMoney(max)}</span><span>{formatMoney(min)}</span></div>
-            <div className="annual-plot">
-                <svg viewBox="0 0 636 185">
-                    <line x1="18" x2="618" y1={y(0)} y2={y(0)} stroke="#7c8ea0" />
+        <div className="annual-plot">
+            <svg viewBox="0 0 752 282" role="group" aria-label="Gráfico de evolução anual. Selecione um mês para destacá-lo.">
+                <defs><linearGradient id={gradientId} x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop stopColor={series[0].color} stopOpacity=".18" />
+                    <stop offset="1" stopColor={series[0].color} stopOpacity=".025" />
+                </linearGradient></defs>
+                <g aria-hidden="true">
+                    {ticks.map(tick => <g key={String(tick)}>
+                        <line className={tick === 0n ? 'annual-zero' : 'annual-grid'} x1={left} x2={right} y1={y(tick)} y2={y(tick)} />
+                        <text x={left - 12} y={y(tick)} dominantBaseline="middle" textAnchor="end">{axisLabel(tick)}</text>
+                    </g>)}
+                    {revenue && <path className="annual-area"
+                        d={`${paths[0]} L${x(months.length - 1)} ${y(0)} L${x(0)} ${y(0)} Z`}
+                        fill={`url(#${gradientId})`} />}
                     {revenue?.map(({ thresholds }, index) => thresholds && <g key={months[index]}>
                         <path d={`M${x(index) - step / 2} ${y(thresholds.ceiling)}h${step}`} stroke={ceiling.color} strokeDasharray={ceiling.dash} />
                         <path d={`M${x(index) - step / 2} ${y(thresholds.excessBoundary)}h${step}`} stroke={boundary.color} strokeDasharray={boundary.dash} />
                     </g>)}
-                    <line x1={x(selected)} x2={x(selected)} y1="8" y2="158" stroke="#7c8ea0" strokeDasharray="4 4" />
-                    {series.map((item, seriesIndex) => <g key={item.label} fill={item.color}>
-                        <path d={item.values.map((value, index) => {
-                            const reset = revenue && revenue[index].year !== revenue[index - 1]?.year;
-                            return `${index === 0 || reset ? 'M' : 'L'}${x(index)} ${y(value)}`;
-                        }).join(' ')} fill="none" stroke={item.color} strokeWidth="2.5" strokeDasharray={seriesDashes[seriesIndex]} />
-                        {item.values.map((value, index) => <circle key={months[index]} cx={x(index)} cy={y(value)}
-                            r={index === selected ? 6 : 4} stroke="white" strokeWidth="1.5" />)}
-                    </g>)}
-                    {months.map((month, index) => <text key={month} x={x(index)} y="177" textAnchor="middle"
-                        fill="currentColor" fontSize="11">{month.slice(5)}/{month.slice(2, 4)}</text>)}
-                </svg>
-            </div>
+                    {series.map((item, index) => <path className="annual-series-line" key={item.label}
+                        d={paths[index]} fill="none" stroke={item.color} />)}
+                </g>
+                {months.map((month, index) => {
+                    const description = [label(month), ...series.map(item =>
+                        `${item.label}: ${formatMoney(item.values[index])}`)].join('. ');
+                    return <g key={month} className="annual-point-selector" role="button" tabIndex={0}
+                        aria-pressed={index === selected} aria-label={description} onClick={() => onSelect(index)}
+                        onKeyDown={event => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                onSelect(index);
+                            }
+                        }}>
+                        <title>{description}</title>
+                        <rect className="annual-month-band" x={x(index) - step / 2 + 2} y={top - 9}
+                            width={step - 4} height={bottom - top + 45} rx="7" />
+                        <line className="annual-month-guide" x1={x(index)} x2={x(index)} y1={top} y2={bottom}
+                            strokeDasharray="4 4" />
+                        {series.map(item => <circle className="annual-marker" key={item.label}
+                            cx={x(index)} cy={y(item.values[index])} r={index === selected ? 6 : 4}
+                            fill={item.color} />)}
+                        <text className="annual-month-label" x={x(index)} y="269" textAnchor="middle">
+                            {monthShort.format(new Date(month + '-01T00:00:00Z')).replace(/\.$/, '')}
+                        </text>
+                    </g>;
+                })}
+            </svg>
         </div>
-    </>;
+    </div>;
 }
 
 function monthsOfYear(year: string) {
@@ -95,13 +147,19 @@ export function AnnualEvolution({ month }: { month: string }) {
     }, [cash, fiscal, year]);
 
     const revenue = services && recordedRevenue(months, services);
-    const selectedRevenue = revenue?.[selected];
+    const wholeYear = selected === -1;
+    const selectedRevenue = revenue?.[wholeYear ? revenue.length - 1 : selected];
     const thresholds = selectedRevenue?.thresholds;
     const room = selectedRevenue && thresholds ? BigInt(thresholds.ceiling) - selectedRevenue.total : null;
     const activeRevenue = fiscal ? revenue : null;
     const series = fiscal
-        ? revenue && [{ label: 'Faturamento acumulado no ano', color: '#087565', values: revenue.map(point => point.total) }]
+        ? revenue && [{ label: 'Faturamento acumulado no ano', color: 'var(--income)', values: revenue.map(point => point.total) }]
         : cash && metrics.map(metric => ({ ...metric, values: cash.map(value => value[metric.key]) }));
+    const selectedCash = !fiscal && series
+        ? series.map(item => ({ ...item, selectedValue: wholeYear
+            ? item.values.reduce<bigint>((sum, value) => sum + BigInt(value), 0n)
+            : item.values[selected] }))
+        : [];
     const loadError = fiscal ? revenueError : cashError;
 
     return <section className="dashboard-panel evolution" aria-labelledby="annual-evolution-title">
@@ -113,6 +171,7 @@ export function AnnualEvolution({ month }: { month: string }) {
             </div>
             <label className="evolution-month">Mês em destaque
                 <select value={selected} onChange={event => setSelected(Number(event.target.value))}>
+                    <option value={-1}>Anual de {year}</option>
                     {months.map((month, index) => <option key={month} value={index}>{label(month)}</option>)}
                 </select>
             </label>
@@ -120,7 +179,8 @@ export function AnnualEvolution({ month }: { month: string }) {
         {series ? <>
             {fiscal && selectedRevenue && <div className="annual-metrics" aria-live="polite">
                 <dl className="monthly-deltas">
-                    <div><dt>Faturamento até {label(months[selected])}</dt><dd>{formatMoney(selectedRevenue.total)}</dd></div>
+                    <div><dt>{wholeYear ? `Faturamento em ${year}` : `Faturamento até ${label(months[selected])}`}</dt>
+                        <dd>{formatMoney(selectedRevenue.total)}</dd></div>
                     {thresholds && <div><dt>{thresholds.projected ? 'Teto anual previsto' : 'Teto do ano completo'}</dt>
                         <dd>{formatMoney(thresholds.ceiling)}</dd></div>}
                     {room !== null && <div><dt>{room < 0 ? 'Excedente sobre o teto' : 'Margem até o teto'}</dt>
@@ -139,9 +199,11 @@ export function AnnualEvolution({ month }: { month: string }) {
                 <p className="muted">Estimativa pelos serviços cadastrados, na data do serviço. O acumulado reinicia em janeiro. No ano de abertura, o teto é proporcional aos meses de atividade.</p>
                 </div>
             </div>}
-            {!fiscal && <dl className="monthly-deltas annual-metrics" aria-live="polite">{series.map(item =>
-                <div key={item.label}><dt>{item.label}</dt><dd>{formatMoney(item.values[selected])}</dd></div>)}</dl>}
-            <EvolutionChart months={months} selected={selected} series={series} revenue={activeRevenue} />
+            {!fiscal && <dl className="monthly-deltas annual-metrics" aria-live="polite">{selectedCash.map(item =>
+                <div key={item.label}><dt>{item.label}{wholeYear ? ` em ${year}` : ''}</dt>
+                    <dd>{formatMoney(item.selectedValue)}</dd></div>)}</dl>}
+            <EvolutionChart months={months} selected={selected} series={series} revenue={activeRevenue}
+                onSelect={setSelected} />
             <section className="annual-information" aria-labelledby="annual-values-heading">
                 <h4 id="annual-values-heading">Valores dos {months.length} meses</h4>
                 <div className="table-scroll" role="region" aria-label="Valores da evolução anual" tabIndex={0}>
