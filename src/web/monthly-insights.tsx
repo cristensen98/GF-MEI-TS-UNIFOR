@@ -16,7 +16,9 @@ const receiptPalette = ['var(--overview-income, var(--income))', 'var(--overview
 
 type ChartValues = [string, number | bigint][];
 
-function Donut({ title, values, palette }: { title: string; values: ChartValues; palette: string[] }) {
+function Donut({ title, values, palette, empty }: {
+    title: string; values: ChartValues; palette: string[]; empty: string;
+}) {
     const total = values.reduce((sum, [, value]) => sum + BigInt(value), 0n);
     const share = (value: number | bigint) => Number(value) / Number(total);
     let position = 0;
@@ -36,7 +38,7 @@ function Donut({ title, values, palette }: { title: string; values: ChartValues;
                 <span className="series-key" aria-hidden="true" style={{ background: palette[index % palette.length] }} />
                 <span>{name}</span><strong>{formatMoney(value)} · {percent.format(share(value))}</strong>
             </li>)}</ul>
-        </div> : <p className="chart-empty">Sem valores para este período.</p>}
+        </div> : <p className="chart-empty">{empty}</p>}
     </section>;
 }
 
@@ -53,8 +55,10 @@ export function MonthlyInsights({ month, summary }: { month: string; summary: Mo
                 const ids = new Set(selected.map(entry => entry.id));
                 const contracted = selected.reduce((sum, entry) => sum + BigInt(serviceTotal(entry)), 0n);
                 const paid = receipts.reduce((sum, entry) => !entry.cancelado && entry.servico !== null &&
-                    ids.has(entry.servico) && entry.data.slice(0, 7) <= month ? sum + BigInt(entry.valor) : sum, 0n);
-                setServiceValues([['Recebido até o fim do mês', paid], ['Em aberto no fim do mês', contracted - paid]]);
+                    ids.has(entry.servico) && entry.data.slice(0, 7) <= (month.length === 4 ? month + '-12' : month)
+                    ? sum + BigInt(entry.valor) : sum, 0n);
+                const period = month.length === 4 ? 'ano' : 'mês';
+                setServiceValues([['Recebido até o fim do ' + period, paid], ['Em aberto no fim do ' + period, contracted - paid]]);
             })
             .catch(() => { if (active) setServicesError(true); });
         return () => { active = false; };
@@ -68,9 +72,12 @@ export function MonthlyInsights({ month, summary }: { month: string; summary: Mo
     return <div className="monthly-insights">
         <div className="dashboard-charts">
             <Donut title="Composição das despesas pagas" palette={categoryPalette}
+                empty="Cadastre despesas e informe a data do pagamento no período selecionado para visualizar sua composição."
                 values={[...categories].sort((a, b) => b[1] - a[1])} />
-            {serviceValues ? <Donut title="Recebimento dos serviços do mês" palette={receiptPalette} values={serviceValues} /> :
-                <section className="dashboard-panel"><h3>Recebimento dos serviços do mês</h3>
+            {serviceValues ? <Donut title={'Recebimento dos serviços do ' + (month.length === 4 ? 'ano' : 'mês')}
+                palette={receiptPalette} values={serviceValues}
+                empty="Cadastre serviços com data no período selecionado para acompanhar os valores recebidos e em aberto." /> :
+                <section className="dashboard-panel"><h3>Recebimento dos serviços do período</h3>
                     <p role="status">{servicesError ? 'Não foi possível carregar os serviços.' : 'Carregando serviços…'}</p>
                 </section>}
         </div>

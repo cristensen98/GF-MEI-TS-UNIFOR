@@ -1,4 +1,4 @@
-import { DomainError, serviceTotal } from './model.ts';
+import { DomainError, expenseCategories, serviceTotal } from './model.ts';
 import type { Entry, Kind, Repository } from './model.ts';
 import { parseDraft } from './validation.ts';
 import { businessDate } from './calendar.ts';
@@ -42,8 +42,14 @@ export class Ledger {
         const draft = parseDraft(kind, body);
         return this.repository.transaction(() => {
             const existing = id === undefined ? undefined : this.get(kind, id);
-            if (existing?.cancelado) {
-                throw new DomainError('O lançamento está cancelado.', 409);
+            const cancelled = draft.cancelado ?? existing?.cancelado ?? false;
+            if (kind === 'servicos' && cancelled && id !== undefined &&
+                (this.linked('despesas', id).length || this.linked('recebimentos', id).length)) {
+                throw new DomainError('O serviço ainda tem lançamentos ativos.', 409);
+            }
+            if (kind === 'despesas' && draft.detalhe !== existing?.detalhe &&
+                !expenseCategories.includes(draft.detalhe ?? '')) {
+                throw new DomainError('Selecione uma das categorias de despesa disponíveis.');
             }
             if (kind === 'despesas' && existing) {
                 if (existing.recorrenciaOrigem && (draft.recorrente || draft.data !== existing.data)) {
@@ -57,8 +63,8 @@ export class Ledger {
             }
             if (draft.servico !== null) {
                 const service = this.get('servicos', draft.servico);
-                if (service.cancelado) throw new DomainError('O serviço está cancelado.', 409);
-                if (kind === 'recebimentos') {
+                if (!cancelled && service.cancelado) throw new DomainError('O serviço está cancelado.', 409);
+                if (kind === 'recebimentos' && !cancelled) {
                     const other = this.linked('recebimentos', service.id).filter(entry => entry.id !== id);
                     if (draft.valor > serviceTotal(service) - total(other)) {
                         throw new DomainError('O recebimento excede o saldo do serviço.', 409);
@@ -73,6 +79,7 @@ export class Ledger {
                     throw new DomainError('O valor acordado é inferior ao valor recebido.', 409);
                 }
             }
+            draft.cancelado = cancelled;
             return id === undefined ? this.repository.create(kind, draft) : this.repository.update(kind, id, draft, this.today());
         });
     }
@@ -100,8 +107,8 @@ export class Ledger {
     }
 
     monthlySummary(month: string) {
-        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
-            throw new DomainError('Informe o mês no formato AAAA-MM.');
+        if (!/^\d{4}(-(0[1-9]|1[0-2]))?$/.test(month)) {
+            throw new DomainError('Informe o período no formato AAAA ou AAAA-MM.');
         }
         const datePrefix = month + '-';
         const recebimentos = this.list('recebimentos').filter(entry => !entry.cancelado && entry.data.startsWith(datePrefix));

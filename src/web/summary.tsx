@@ -35,19 +35,21 @@ export function dateLabel(date: string) {
 }
 
 function CashCharts({ summary, month }: { summary: MonthSummary; month: string }) {
-    const endOfMonth = new Date(`${month}-01T00:00:00Z`);
+    const annual = month.length === 4;
+    const endOfMonth = new Date(`${annual ? month + '-12' : month}-01T00:00:00Z`);
     endOfMonth.setUTCMonth(endOfMonth.getUTCMonth() + 1, 0);
     const lastDay = endOfMonth.getUTCDate();
-    const periods = Array.from({ length: Math.ceil(lastDay / 7) }, (_, index) => ({
-        label: `${index * 7 + 1}–${Math.min((index + 1) * 7, lastDay)}`, income: 0, expenses: 0
+    const periods = Array.from({ length: annual ? 12 : Math.ceil(lastDay / 7) }, (_, index) => ({
+        label: annual ? String(index + 1).padStart(2, '0') : `${index * 7 + 1}–${Math.min((index + 1) * 7, lastDay)}`, income: 0, expenses: 0
     }));
+    const periodIndex = (date: string) => annual ? Number(date.slice(5, 7)) - 1 : Math.floor((Number(date.slice(-2)) - 1) / 7);
     for (const entry of summary.recebimentos) {
-        periods[Math.floor((Number(entry.data.slice(-2)) - 1) / 7)].income += entry.valor;
+        periods[periodIndex(entry.data)].income += entry.valor;
     }
     const categories = new Map<string, number>();
     for (const entry of summary.despesas) {
         if (!entry.pagamento) continue;
-        periods[Math.floor((Number(entry.pagamento.slice(-2)) - 1) / 7)].expenses += entry.valor;
+        periods[periodIndex(entry.pagamento)].expenses += entry.valor;
         const category = entry.detalhe || 'Sem categoria';
         categories.set(category, (categories.get(category) ?? 0) + entry.valor);
     }
@@ -73,15 +75,15 @@ function CashCharts({ summary, month }: { summary: MonthSummary; month: string }
                 </div>
                 <details><summary>Ver valores por período</summary>
                     <table className="chart-table">
-                        <caption>Fluxo de caixa por dias do mês</caption>
-                        <thead><tr><th scope="col">Dias</th><th scope="col">Entradas</th><th scope="col">Despesas</th></tr></thead>
+                        <caption>{annual ? 'Fluxo de caixa por mês' : 'Fluxo de caixa por dias do mês'}</caption>
+                        <thead><tr><th scope="col">{annual ? 'Mês' : 'Dias'}</th><th scope="col">Entradas</th><th scope="col">Despesas</th></tr></thead>
                         <tbody>{periods.map(period => <tr key={period.label}>
                             <th scope="row">{period.label}</th><td>{formatMoney(period.income)}</td>
                             <td>{formatMoney(period.expenses)}</td>
                         </tr>)}</tbody>
                     </table>
                 </details>
-            </> : <p className="chart-empty">Nenhuma movimentação de caixa neste mês.</p>}
+            </> : <p className="chart-empty">Registre recebimentos ou pagamentos de despesas no período selecionado para acompanhar o fluxo de caixa.</p>}
         </section>
         <section className="dashboard-panel" aria-labelledby="categories-heading">
             <h3 id="categories-heading">Despesas por categoria</h3>
@@ -93,7 +95,7 @@ function CashCharts({ summary, month }: { summary: MonthSummary; month: string }
                     <div><span className="category-track" aria-hidden="true"><span style={{ width: `${share * 100}%` }} /></span>
                         <span>{new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(share)}</span></div>
                 </li>;
-            })}</ul> : <p className="chart-empty">Nenhuma despesa paga neste mês.</p>}
+            })}</ul> : <p className="chart-empty">Cadastre despesas com categoria e informe a data do pagamento no período selecionado para comparar os gastos.</p>}
         </section>
     </div>;
 }
@@ -116,9 +118,9 @@ export function MonthlyReport({ summary, month }: { summary: MonthSummary; month
     const entries = [...summary.recebimentos, ...summary.despesas].sort((first, second) =>
         (second.pagamento ?? second.data).localeCompare(first.pagamento ?? first.data) || second.id - first.id);
     const indicators = {
-        resultado: { label: 'Resultado de caixa', entries, empty: 'Nenhum lançamento neste mês.' },
-        entradas: { label: 'Entradas', entries: entries.filter(entry => !entry.pagamento), empty: 'Nenhum recebimento neste mês.' },
-        saidas: { label: 'Despesas pagas', entries: entries.filter(entry => entry.pagamento), empty: 'Nenhuma despesa paga neste mês.' }
+        resultado: { label: 'Resultado de caixa', entries, empty: 'Registre recebimentos ou pagamentos de despesas no período selecionado para calcular o resultado de caixa.' },
+        entradas: { label: 'Entradas', entries: entries.filter(entry => !entry.pagamento), empty: 'Cadastre um recebimento com data no período selecionado para acompanhar as entradas.' },
+        saidas: { label: 'Despesas pagas', entries: entries.filter(entry => entry.pagamento), empty: 'Informe a data do pagamento das despesas no período selecionado para acompanhar as saídas.' }
     };
     const indicator = selection && indicators[selection.key];
     return <>
@@ -134,11 +136,11 @@ export function MonthlyReport({ summary, month }: { summary: MonthSummary; month
         <MonthlyInsights key={month} month={month} summary={summary} />
         <CashCharts summary={summary} month={month} />
         <section className="dashboard-panel" aria-labelledby="transactions-heading">
-            <h3 id="transactions-heading">Lançamentos do mês</h3>
-            <Transactions entries={entries} empty="Nenhum lançamento neste mês." />
+            <h3 id="transactions-heading">{month.length === 4 ? 'Lançamentos do ano' : 'Lançamentos do mês'}</h3>
+            <Transactions entries={entries} empty="Registre recebimentos ou pagamentos de despesas no período selecionado para consultar seus lançamentos aqui." />
         </section>
         {selection && indicator && <Modal title={indicator.label} trigger={selection.trigger} close={() => setSelection(null)}>
-            <p className="muted">Referência: {month.slice(5)}/{month.slice(0, 4)}</p>
+            <p className="muted">Referência: {month.length === 4 ? month : month.slice(5) + '/' + month.slice(0, 4)}</p>
             <p className="modal-total">{formatMoney(summary[selection.key])}</p>
             {selection.key === 'resultado' && <Amounts values={[[ 'Entradas', summary.entradas], ['Despesas pagas', summary.saidas]]} />}
             <h3>Lançamentos considerados</h3>

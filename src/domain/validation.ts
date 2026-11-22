@@ -17,6 +17,9 @@ export function parseDraft(kind: Kind, value: unknown): Draft {
         throw new DomainError('Informe os dados do lançamento.');
     }
     const body = value as Record<string, unknown>;
+    if (body.cancelado !== undefined && typeof body.cancelado !== 'boolean') {
+        throw new DomainError('Selecione uma situação válida.');
+    }
     const descricao = typeof body.descricao === 'string' ? body.descricao.trim() : '';
     if (!descricao || descricao.length > 180) {
         throw new DomainError('Informe uma descrição de até 180 caracteres.');
@@ -45,6 +48,7 @@ export function parseDraft(kind: Kind, value: unknown): Draft {
         throw new DomainError('Informe um custo de materiais válido em centavos.');
     }
     return { descricao, detalhe: kind === 'recebimentos' ? null : detalhe || null, valor: body.valor, data: date(body.data),
-        servico, pagamento, recorrente: body.recorrente as boolean | undefined, custoMaterial };
+        servico, pagamento, recorrente: body.recorrente as boolean | undefined, custoMaterial,
+        cancelado: body.cancelado as boolean | undefined };
 }
 

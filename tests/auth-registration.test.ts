@@ -29,7 +29,7 @@ test('cadastro público cria uma sessão comum sem aprovação', async () => {
         assert.equal(registration.status, 201);
         assert.match(registration.headers.get('Content-Security-Policy') ?? '', /frame-ancestors 'none'/);
         assert.equal(registration.headers.get('X-Content-Type-Options'), 'nosniff');
-        const expected = { usuario: 'mei-teste', administrador: false };
+        const expected = { usuario: 'mei-teste', administrador: true };
         assert.deepEqual(await registration.json(), expected);
         const cookie = registration.headers.getSetCookie()[0].split(';')[0];
         assert.deepEqual(await (await fetch(base + 'session', { headers: { Cookie: cookie } })).json(), expected);

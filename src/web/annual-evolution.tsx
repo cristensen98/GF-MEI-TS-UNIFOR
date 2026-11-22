@@ -3,6 +3,7 @@ import type { Entry } from '../domain/model.ts';
 import { recordedRevenue } from '../domain/mei-revenue.ts';
 import { formatMoney, request } from './client.ts';
 import type { MonthSummary } from './summary.tsx';
+import { MonthSelect, monthLabel as label, monthsOfYear } from './month-select.tsx';
 
 type CashTotals = Pick<MonthSummary, 'entradas' | 'saidas' | 'resultado'>;
 
@@ -11,8 +12,6 @@ const metrics = [
     { key: 'saidas', label: 'Despesas pagas', color: 'var(--cash-out)' },
     { key: 'resultado', label: 'Resultado de caixa', color: 'var(--primary)' }
 ] as const;
-const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-const label = (month: string) => monthName.format(new Date(month + '-01T00:00:00Z'));
 
 type Revenue = ReturnType<typeof recordedRevenue>;
 type Series = { label: string; color: string; values: (number | bigint)[] };
@@ -118,16 +117,13 @@ function EvolutionChart({ months, selected, series, revenue, referenceOnly, onSe
     </div>;
 }
 
-function monthsOfYear(year: string) {
-    return Array.from({ length: 12 }, (_, index) => year + '-' + String(index + 1).padStart(2, '0'));
-}
-
 export function AnnualEvolution({ month, openingMonth }: { month: string; openingMonth?: string }) {
-    const year = month.slice(0, 4);
+    const [year, setYear] = useState(month.slice(0, 4));
     const months = monthsOfYear(year);
     const [selected, setSelected] = useState(Number(month.slice(5)) - 1);
     const [fiscal, setFiscal] = useState(true);
-    const [cash, setCash] = useState<CashTotals[] | null>(null);
+    const [cashReport, setCashReport] = useState<{ year: string; totals: CashTotals[] } | null>(null);
+    const cash = cashReport?.year === year ? cashReport.totals : null;
     const [services, setServices] = useState<Entry[] | null>(null);
     const [cashError, setCashError] = useState(false);
     const [revenueError, setRevenueError] = useState(false);
@@ -144,7 +140,7 @@ export function AnnualEvolution({ month, openingMonth }: { month: string; openin
         let active = true;
         setCashError(false);
         void request<CashTotals[]>('resumo/anual/' + year)
-            .then(result => { if (active) setCash(result); })
+            .then(result => { if (active) setCashReport({ year, totals: result }); })
             .catch(() => { if (active) setCashError(true); });
         return () => { active = false; };
     }, [cash, fiscal, year]);
@@ -177,12 +173,9 @@ export function AnnualEvolution({ month, openingMonth }: { month: string; openin
                 <button type="button" aria-pressed={fiscal} onClick={() => setFiscal(true)}>Faturamento e limite MEI</button>
                 <button type="button" aria-pressed={!fiscal} onClick={() => setFiscal(false)}>Fluxo de caixa</button>
             </div>
-            <label className="evolution-month">Mês em destaque
-                <select value={selected} onChange={event => setSelected(Number(event.target.value))}>
-                    <option value={-1}>Anual de {year}</option>
-                    {months.map((month, index) => <option key={month} value={index}>{label(month)}</option>)}
-                </select>
-            </label>
+            <MonthSelect label="Mês em destaque" year={year} value={months[selected] ?? ''}
+                onChange={value => { setYear(value.slice(0, 4)); setSelected(Number(value.slice(5)) - 1); }}
+                onAnnual={value => { setYear(value); setSelected(-1); }} />
         </div>
         {series ? <>
             {fiscal && selectedRevenue && <div className="annual-metrics" aria-live="polite">

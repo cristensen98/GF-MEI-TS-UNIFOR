@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { amountInput, cents, formatMoney } from './client.ts';
-import { serviceTotal } from '../domain/model.ts';
+import { expenseCategories, serviceTotal } from '../domain/model.ts';
 import type { Draft, Entry, Kind } from '../domain/model.ts';
 import type { FormEvent } from 'react';
 
@@ -19,6 +19,7 @@ export function EntryForm({ kind, selected, services, save, close, busy }: Props
     const [amountError, setAmountError] = useState('');
     const [materialError, setMaterialError] = useState('');
     const [error, setError] = useState('');
+    const [paid, setPaid] = useState(Boolean(selected?.pagamento));
     const [baseText, setBaseText] = useState(selected ? amountInput(selected.valor) : '');
     const [materialText, setMaterialText] = useState(selected?.custoMaterial == null ? '' : amountInput(selected.custoMaterial));
     let preview = '—';
@@ -61,6 +62,7 @@ export function EntryForm({ kind, selected, services, save, close, busy }: Props
         try {
             await save({
                 descricao: String(values.get('descricao')),
+                cancelado: values.get('situacaoCadastro') === 'cancelado',
                 detalhe: String(values.get('detalhe') || '') || null,
                 valor: value,
                 data: String(values.get('data')),
@@ -79,8 +81,22 @@ export function EntryForm({ kind, selected, services, save, close, busy }: Props
     return <form id="entry-form" onSubmit={submit} className="entry-form" aria-busy={busy}>
         <fieldset disabled={busy}>
             <label>Descrição<input data-initial-focus name="descricao" required maxLength={180} defaultValue={selected?.descricao} /></label>
-            {kind !== 'recebimentos' && <label>{kind === 'despesas' ? 'Categoria' : 'Cliente (opcional)'}
-                <input name="detalhe" required={kind === 'despesas'} maxLength={120} defaultValue={selected?.detalhe ?? ''} />
+            <label>Status do lançamento
+                <select name="situacaoCadastro" defaultValue={selected?.cancelado ? 'cancelado' : 'ativo'}>
+                    <option value="ativo">Ativo</option>
+                    <option value="cancelado">Cancelado</option>
+                </select>
+            </label>
+            {kind === 'despesas' && <label>Categoria
+                <select name="detalhe" required defaultValue={selected?.detalhe ?? ''}>
+                    <option value="">Selecione uma categoria</option>
+                    {selected?.detalhe && !expenseCategories.includes(selected.detalhe) &&
+                        <option value={selected.detalhe}>{selected.detalhe} (categoria anterior)</option>}
+                    {expenseCategories.map(category => <option key={category} value={category}>{category}</option>)}
+                </select>
+            </label>}
+            {kind === 'servicos' && <label>Cliente (opcional)
+                <input name="detalhe" maxLength={120} defaultValue={selected?.detalhe ?? ''} />
             </label>}
             <div className={kind === 'servicos' ? 'service-price-fields' : undefined}>
                 <label>{kind === 'servicos' ? 'Valor do serviço (R$)' : 'Valor (R$)'}
@@ -110,13 +126,21 @@ export function EntryForm({ kind, selected, services, save, close, busy }: Props
             {kind !== 'servicos' && <label>Serviço
                 <select name="servico" required={kind === 'recebimentos'} defaultValue={selected?.servico ?? ''}>
                     <option value="">{kind === 'despesas' ? 'Despesa geral' : 'Selecione'}</option>
-                    {services.filter(service => !service.cancelado).map(service =>
+                    {services.filter(service => !service.cancelado || service.id === selected?.servico).map(service =>
                         <option key={service.id} value={service.id}>{service.descricao}</option>)}
                 </select>
             </label>}
-            {kind === 'despesas' && <label>Data do pagamento (opcional)
-                <input type="date" name="pagamento" defaultValue={selected?.pagamento ?? ''} />
-            </label>}
+            {kind === 'despesas' && <>
+                <label>Situação
+                    <select value={paid ? 'paga' : 'aberta'} onChange={event => setPaid(event.target.value === 'paga')}>
+                        <option value="aberta">A pagar</option>
+                        <option value="paga">Paga</option>
+                    </select>
+                </label>
+                {paid && <label>Data do pagamento
+                    <input type="date" name="pagamento" required defaultValue={selected?.pagamento ?? ''} />
+                </label>}
+            </>}
             {kind === 'despesas' && !selected?.recorrenciaOrigem && <div className="recurrence-field">
                 <label><input type="checkbox" name="recorrente" defaultChecked={selected?.recorrente}
                     aria-describedby="recurrence-hint" /> Repetir todo mês</label>

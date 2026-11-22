@@ -93,10 +93,10 @@ export class SqliteRepository implements Repository {
 
     create(kind: Kind, draft: Draft): Entry {
         const row = this.db.prepare(`
-            INSERT INTO lancamentos (workspace, tipo, descricao, detalhe, valor, data, servico, pagamento, recorrencia_desde, custo_material)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *
+            INSERT INTO lancamentos (workspace, tipo, descricao, detalhe, valor, data, servico, pagamento, recorrencia_desde, custo_material, cancelado)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *
         `).get(this.workspace, kind, draft.descricao, draft.detalhe, draft.valor, draft.data, draft.servico, draft.pagamento,
-            draft.recorrente ? draft.data : null, draft.custoMaterial ?? null);
+            draft.recorrente ? draft.data : null, draft.custoMaterial ?? null, draft.cancelado ? 1 : 0);
         return mapEntry(row!);
     }
 
@@ -104,10 +104,12 @@ export class SqliteRepository implements Repository {
         const row = this.db.prepare(`
             UPDATE lancamentos SET descricao = ?, detalhe = ?, valor = ?, data = ?, servico = ?, pagamento = ?,
                 recorrencia_desde = CASE WHEN ? THEN COALESCE(recorrencia_desde, ?) END,
-                custo_material = CASE WHEN ? THEN ? ELSE custo_material END
+                custo_material = CASE WHEN ? THEN ? ELSE custo_material END,
+                cancelado = COALESCE(?, cancelado)
             WHERE workspace = ? AND tipo = ? AND id = ? RETURNING *
         `).get(draft.descricao, draft.detalhe, draft.valor, draft.data, draft.servico, draft.pagamento,
-            draft.recorrente ? 1 : 0, today, draft.custoMaterial === undefined ? 0 : 1, draft.custoMaterial ?? null, this.workspace, kind, id);
+            draft.recorrente ? 1 : 0, today, draft.custoMaterial === undefined ? 0 : 1, draft.custoMaterial ?? null,
+            draft.cancelado === undefined ? null : draft.cancelado ? 1 : 0, this.workspace, kind, id);
         return mapEntry(row!);
     }
 

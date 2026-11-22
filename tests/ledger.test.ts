@@ -16,6 +16,18 @@ function fixture(t: { after: (cleanup: () => void) => void }, today?: () => stri
     return new Ledger(database, today);
 }
 
+test('aceita categorias fixas e permite manter a categoria de uma despesa antiga', t => {
+    const repository = new SqliteRepository(':memory:');
+    t.after(() => repository.close());
+    const ledger = new Ledger(repository);
+    const legacy = repository.create('despesas', {
+        ...expense, detalhe: 'Categoria antiga', servico: null, pagamento: null
+    });
+    assert.throws(() => ledger.save('despesas', { ...expense, detalhe: legacy.detalhe }), /categorias de despesa disponíveis/);
+    assert.equal(ledger.save('despesas', { ...expense, detalhe: legacy.detalhe }, legacy.id).detalhe, legacy.detalhe);
+    assert.equal(ledger.save('despesas', expense, legacy.id).detalhe, 'Insumos');
+});
+
 test('gera despesas mensais uma vez, ajusta o vencimento e contabiliza somente o pagamento', t => {
     let today = '2026-03-30';
     const ledger = fixture(t, () => today);
@@ -47,6 +59,11 @@ test('o caixa anual usa as datas efetivas e os mesmos totais do resumo mensal', 
     ledger.save('despesas', { ...expense, data: '2025-12-31', pagamento: '2026-01-01' });
     ledger.save('despesas', expense);
     const year = ledger.annualCashSummary('2026');
+    const overview = ledger.monthlySummary('2026');
+    assert.equal(overview.entradas, receipt.valor);
+    assert.equal(overview.saidas, expense.valor);
+    assert.equal(overview.recebimentos.length, 1);
+    assert.equal(overview.despesas.length, 1);
     assert.deepEqual(year[0], { entradas: receipt.valor, saidas: expense.valor, resultado: receipt.valor - expense.valor });
     assert.deepEqual(year[11], { entradas: 0, saidas: 0, resultado: 0 });
     for (let index = 0; index < year.length; index++) {
@@ -75,6 +92,36 @@ test('usa materiais como custo direto sem duplicar despesas vinculadas', t => {
     assert.equal(ledger.serviceSummary(entry.id).situacao, 'Quitado');
     assert.equal(ledger.monthlySummary('2026-04').entradas, service.valor + 4250);
     assert.throws(() => ledger.save('servicos', { ...service, custoMaterial: null }, entry.id), /inferior ao valor recebido/);
+});
+
+test('novas despesas ficam ativas e podem alternar entre a pagar e paga', t => {
+    const ledger = fixture(t);
+    const created = ledger.save('despesas', expense);
+    assert.equal(created.cancelado, false);
+    assert.equal(created.pagamento, null);
+    const paid = ledger.save('despesas', { ...expense, pagamento: '2026-04-02' }, created.id);
+    assert.equal(paid.cancelado, false);
+    assert.equal(paid.pagamento, '2026-04-02');
+    const reopened = ledger.save('despesas', { ...expense, pagamento: null }, created.id);
+    assert.equal(reopened.cancelado, false);
+    assert.equal(reopened.pagamento, null);
+});
+
+test('permite cancelar e reativar lançamentos respeitando vínculos e saldo', t => {
+    const ledger = fixture(t);
+    const entry = ledger.save('servicos', { ...service, cancelado: true });
+    assert.equal(entry.cancelado, true);
+    ledger.save('servicos', { ...service, cancelado: false }, entry.id);
+    const draft = { ...receipt, servico: entry.id, cancelado: true };
+    const payment = ledger.save('recebimentos', draft);
+    assert.equal(payment.cancelado, true);
+    ledger.save('recebimentos', { ...draft, cancelado: false }, payment.id);
+    assert.throws(() => ledger.save('servicos', { ...service, cancelado: true }, entry.id), /ativos/);
+    ledger.save('recebimentos', draft, payment.id);
+    ledger.save('servicos', { ...service, cancelado: true }, entry.id);
+    assert.throws(() => ledger.save('recebimentos', { ...draft, cancelado: false }, payment.id), /serviço está cancelado/);
+    const cost = ledger.save('despesas', { ...expense, cancelado: true });
+    assert.equal(ledger.save('despesas', { ...expense, cancelado: false }, cost.id).cancelado, false);
 });
 
 test('valida lançamentos, consulta e atualiza serviços', t => {

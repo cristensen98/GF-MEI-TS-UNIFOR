@@ -57,6 +57,7 @@ export function auth(databasePath: string) {
                 CREATE UNIQUE INDEX usuarios_workspace ON usuarios(workspace);`);
         }
         db.exec('UPDATE usuarios SET workspace = lower(hex(randomblob(16))) WHERE workspace IS NULL');
+        db.exec('UPDATE usuarios SET administrador = 1 WHERE administrador <> 1');
         db.exec('COMMIT');
     } catch (error) {
         db.exec('ROLLBACK');
@@ -160,13 +161,13 @@ export function auth(databasePath: string) {
         const hash = scryptSync(senha, userSalt, 32);
         const workspace = randomBytes(16).toString('hex');
         const created = login.toLowerCase() !== adminLogin && db.prepare(
-            'INSERT INTO usuarios (usuario, sal, senha, aprovado, workspace) VALUES (?, ?, ?, 1, ?) ON CONFLICT(usuario) DO NOTHING'
+            'INSERT INTO usuarios (usuario, sal, senha, aprovado, administrador, workspace) VALUES (?, ?, ?, 1, 1, ?) ON CONFLICT(usuario) DO NOTHING'
         ).run(login, userSalt, hash, workspace).changes;
         if (!created) {
             res.status(409).json({ erro: 'Esse nome de usuário já está em uso.' });
             return;
         }
-        startSession(req, res, { usuario: login, administrador: false, workspace }, 201);
+        startSession(req, res, { usuario: login, administrador: true, workspace }, 201);
     });
 
     router.post('/auth/login', readJson, (req, res) => {

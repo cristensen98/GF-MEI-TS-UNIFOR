@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { kinds, serviceTotal } from '../domain/model.ts';
+import { expenseCategories, kinds, serviceTotal } from '../domain/model.ts';
 import { businessDate } from '../domain/calendar.ts';
 import type { Draft, Entry, Kind } from '../domain/model.ts';
 import { formatMoney, request } from './client.ts';
@@ -9,6 +9,7 @@ import { EntryForm } from './entry-form.tsx';
 import { DataTable } from './data-table.tsx';
 import { ActionButton } from './action-button.tsx';
 import { AnnualEvolution } from './annual-evolution.tsx';
+import { MonthSelect } from './month-select.tsx';
 import { ProfileMenu } from './profile-menu.tsx';
 import { PasswordField } from './password-field.tsx';
 import { StatusBadge } from './status-badge.tsx';
@@ -20,6 +21,11 @@ import { initializeTheme } from './theme.ts';
 
 const labels = { servicos: 'Serviços', despesas: 'Despesas', recebimentos: 'Recebimentos' };
 const newLabels = { servicos: 'Novo serviço', despesas: 'Nova despesa', recebimentos: 'Novo recebimento' };
+const statusOptions = {
+    servicos: ['Em aberto', 'Parcial', 'Quitado', 'Cancelado'],
+    despesas: ['A pagar', 'Paga', 'Cancelado'],
+    recebimentos: ['Recebido', 'Cancelado']
+};
 type View = Kind | 'resumo' | 'evolucao';
 
 const sidebarIconPaths = {
@@ -48,6 +54,40 @@ function entryStatus(kind: Kind, entry: Entry) {
 
 function normalizeSearch(value: string) {
     return value.trim().toLocaleLowerCase('pt-BR').normalize('NFD').replace(/\p{M}/gu, '');
+}
+
+function DateFilter({ label, value, min, max, onChange }: {
+    label: string; value: string; min?: string; max?: string; onChange: (value: string) => void;
+}) {
+    const input = useRef<HTMLInputElement>(null);
+    const openCalendar = () => {
+        if (!input.current) return;
+        try {
+            if (input.current.showPicker) {
+                input.current.showPicker();
+                return;
+            }
+        } catch {
+            // Alguns navegadores não abrem o seletor nativo de um campo discreto.
+        }
+        input.current.focus();
+        input.current.click();
+    };
+    return <div className="table-date-filter">
+        <span className="table-filter-label">{label}</span>
+        <div className="table-date-control">
+            <button type="button" className="table-date-button" aria-label={`${label}: ${value ? dateLabel(value) : 'qualquer data'}. Abrir calendário`}
+                onClick={openCalendar} title={`${label}: ${value ? dateLabel(value) : 'qualquer data'}`}>
+                <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18" />
+                </svg>
+            </button>
+            {value && <span className="table-date-value">{dateLabel(value)}</span>}
+        </div>
+        <input ref={input} className="table-date-input" type="date" aria-label={label} tabIndex={-1}
+            value={value} min={min} max={max} onChange={event => onChange(event.target.value)} />
+    </div>;
 }
 
 function SearchResults({ query, open }: { query: string; open: (kind: Kind, id: number) => void }) {
@@ -197,6 +237,19 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
     const [notice, setNotice] = useState('');
     const [query, setQuery] = useState('');
     const [searchTarget, setSearchTarget] = useState<number | null>(null);
+    const [statusFilter, setStatusFilter] = useState('');
+    const [nameFilter, setNameFilter] = useState('');
+    const [categoryFilter, setCategoryFilter] = useState('');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
+
+    function clearTableFilters() {
+        setStatusFilter('');
+        setNameFilter('');
+        setCategoryFilter('');
+        setDateFrom('');
+        setDateTo('');
+    }
     const heading = useRef<HTMLHeadingElement>(null);
     const formTrigger = useRef<HTMLButtonElement>(null);
     const detailTrigger = useRef<HTMLButtonElement>(null);
@@ -261,6 +314,7 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
         setQuery('');
         if (next === view) return;
         setView(next);
+        clearTableFilters();
         setEntries([]);
         setServices([]);
         setForm(null);
@@ -297,7 +351,38 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
 
     const pages = { ...labels, resumo: 'Visão geral', evolucao: 'Evolução anual' };
     const searchText = normalizeSearch(query);
-    const annualMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? month : businessDate().slice(0, 7);
+    function statusFor(entry: Entry) {
+        if (view === 'resumo' || view === 'evolucao') return '';
+        const received = receivedByService.get(entry.id) ?? 0;
+        return entryStatus(view, entry) ??
+            (received === serviceTotal(entry) ? 'Quitado' : received > 0 ? 'Parcial' : 'Em aberto');
+    }
+    const normalizedName = normalizeSearch(nameFilter);
+    const invalidDateRange = Boolean(dateFrom && dateTo && dateFrom > dateTo);
+    const categories = [...new Set([...expenseCategories, ...entries
+        .map(entry => entry.detalhe).filter((value): value is string => Boolean(value))])]
+        .sort((first, second) => first.localeCompare(second, 'pt-BR'));
+    const filteredEntries = entries.filter(entry => {
+        const linkedService = view === 'recebimentos'
+            ? services.find(service => service.id === entry.servico) : undefined;
+        const name = [entry.descricao, view === 'servicos' ? entry.detalhe : '',
+            linkedService?.descricao, linkedService?.detalhe].filter(Boolean).join(' ');
+        return !invalidDateRange &&
+            (!statusFilter || statusFor(entry) === statusFilter) &&
+            (!normalizedName || normalizeSearch(name).includes(normalizedName)) &&
+            (!categoryFilter || entry.detalhe === categoryFilter) &&
+            (!dateFrom || entry.data >= dateFrom) &&
+            (!dateTo || entry.data <= dateTo);
+    });
+    const filtersKey = JSON.stringify([view, statusFilter, nameFilter, categoryFilter, dateFrom, dateTo]);
+    function changeMonth(next: string) {
+        if (next === month) return;
+        setMonth(next);
+        setSummary(null);
+        setError('');
+        setLoading(true);
+    }
+
 
     return <>
         <a className="skip-link" href="#section-title">Pular para o conteúdo</a>
@@ -305,12 +390,19 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
             <div className="shell">
                 <div className="brand"><span className="brand-mark" aria-hidden="true">GF</span><div><h1>GF-MEI</h1><p>Gestão financeira</p></div></div>
                 <nav aria-label="Áreas do sistema">
-                    {(['resumo', 'evolucao', ...kinds] as const).map(page =>
+                    {([
+                        { title: 'Relatórios', pages: ['resumo', 'evolucao'] },
+                        { title: 'Cadastro', pages: kinds }
+                    ] satisfies { title: string; pages: readonly View[] }[]).map(group =>
+                    <section className="sidebar-group" key={group.title} aria-label={group.title}>
+                        <h2 className="sidebar-group-title">{group.title}</h2>
+                        {group.pages.map(page =>
                         <button key={page} aria-current={page === view ? 'page' : undefined}
                             aria-disabled={busy || undefined} onClick={() => changeView(page)}>
                             {pages[page]}
                             <SidebarIcon name={page} />
                         </button>)}
+                    </section>)}
                 </nav>
                 <button type="button" className="sidebar-exit" disabled={busy || exiting} onClick={exit}>
                     {exiting ? 'Saindo…' : 'Sair'}
@@ -334,14 +426,10 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
             <p role="alert">{sessionError}</p>
             <div className="section-heading">
                 <h2 id="section-title" tabIndex={-1} ref={heading}>{searchText ? 'Resultados da busca' : pages[view]}</h2>
-                {!searchText && view !== 'evolucao' && (view === 'resumo' ? <label className="month-control">Mês de referência
-                    <input type="month" value={month} onChange={event => {
-                        setMonth(event.target.value);
-                        setSummary(null);
-                        setError('');
-                        setLoading(Boolean(event.target.value));
-                    }} />
-                </label> : <button ref={newButton} className="primary" disabled={busy}
+                {!searchText && view !== 'evolucao' && (view === 'resumo' ?
+                    <MonthSelect label="Período de referência" year={month.slice(0, 4)}
+                        value={month.length === 4 ? '' : month} onChange={changeMonth} onAnnual={changeMonth} />
+                    : <button ref={newButton} className="primary" disabled={busy}
                     aria-haspopup="dialog"
                     onClick={event => {
                         formTrigger.current = event.currentTarget;
@@ -350,13 +438,14 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
             </div>
             {searchText ? <SearchResults query={searchText} open={(kind, id) => {
                 changeView(kind, false);
+                clearTableFilters();
                 setSearchTarget(id);
             }} /> : <>
             <p role="alert">{error}</p>
             <p role="status">{notice}</p>
             <p role="status">{loading ? 'Carregando…' : ''}</p>
             {view === 'resumo' ? summary && <MonthlyReport summary={summary} month={month} /> :
-                view === 'evolucao' ? <AnnualEvolution key={annualMonth} month={annualMonth} openingMonth={openingMonth} /> : <>
+                view === 'evolucao' ? <AnnualEvolution key={month} month={month.length === 4 ? month + '-12' : month} openingMonth={openingMonth} /> : <>
                 {form && <Modal title={form.entry ? 'Editar ' + form.entry.descricao : newLabels[view]}
                     trigger={formTrigger.current} busy={busy} close={closeForm}>
                     <EntryForm kind={view} selected={form.entry} services={services}
@@ -366,15 +455,39 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
                             closeForm();
                         }} />
                 </Modal>}
-                {!loading && !error && entries.length === 0 && <p className="empty">Nenhum lançamento cadastrado.</p>}
-                {entries.length > 0 && <DataTable key={view} label={labels[view]}
-                    targetRow={searchTarget === null ? -1 : entries.findIndex(entry => entry.id === searchTarget)} columns={[
+                <div className="table-filters">
+                    <label>Nome
+                        <input type="search" value={nameFilter} placeholder={view === 'servicos'
+                            ? 'Descrição ou cliente' : view === 'recebimentos' ? 'Descrição, serviço ou cliente' : 'Descrição da despesa'}
+                            onChange={event => setNameFilter(event.target.value)} />
+                    </label>
+                    <DateFilter label="Data inicial" value={dateFrom} max={dateTo || undefined} onChange={setDateFrom} />
+                    <DateFilter label="Data final" value={dateTo} min={dateFrom || undefined} onChange={setDateTo} />
+                    {view === 'despesas' && <label>Categoria
+                        <select value={categoryFilter} onChange={event => setCategoryFilter(event.target.value)}>
+                            <option value="">Todas as categorias</option>
+                            {categories.map(category => <option key={category} value={category}>{category}</option>)}
+                        </select>
+                    </label>}
+                    <label>Situação
+                        <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+                            <option value="">Todas as situações</option>
+                            {statusOptions[view].map(status => <option key={status} value={status}>{status}</option>)}
+                        </select>
+                    </label>
+                    <button type="button" onClick={clearTableFilters}>Limpar filtros</button>
+                    {!loading && !error && <p role="status">{filteredEntries.length} de {entries.length} lançamentos</p>}
+                </div>
+                {invalidDateRange && <p role="alert">A data final deve ser igual ou posterior à data inicial.</p>}
+                {!loading && !error && filteredEntries.length === 0 && <p className="empty">
+                    {entries.length ? 'Nenhum lançamento encontrado para os filtros selecionados.' : 'Nenhum lançamento cadastrado.'}
+                </p>}
+                {filteredEntries.length > 0 && <DataTable key={filtersKey} label={labels[view]}
+                    targetRow={searchTarget === null ? -1 : filteredEntries.findIndex(entry => entry.id === searchTarget)} columns={[
                     'Descrição', 'Data', view === 'servicos' ? 'Cliente' : view === 'despesas' ? 'Categoria' : 'Serviço',
                     'Situação', ...(view === 'servicos' ? ['Serviço', 'Custo direto', 'Total'] : ['Valor']), 'Ações'
-                ]}>{entries.map(entry => {
-                    const received = receivedByService.get(entry.id) ?? 0;
-                    const status = entryStatus(view, entry) ??
-                        (received === serviceTotal(entry) ? 'Quitado' : received > 0 ? 'Parcial' : 'Em aberto');
+                ]}>{filteredEntries.map(entry => {
+                    const status = statusFor(entry);
                     return <tr key={entry.id} id={'entry-' + entry.id} tabIndex={-1}>
                             <th scope="row">{entry.descricao}</th>
                             <td><time dateTime={entry.data}>{dateLabel(entry.data)}</time></td>
@@ -391,8 +504,8 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
                                 <td className="table-number">{formatMoney(entry.custoDireto ?? entry.custoMaterial ?? 0)}</td>
                                 <td className="table-number">{formatMoney(serviceTotal(entry))}</td>
                             </>}
-                        <td>{view !== 'servicos' && entry.cancelado ? '—' : <div className="actions">
-                            {!entry.cancelado && <ActionButton icon="edit" disabled={busy} label={'Editar ' + entry.descricao} aria-haspopup="dialog"
+                        <td><div className="actions">
+                            {<ActionButton icon="edit" disabled={busy} label={'Editar ' + entry.descricao} aria-haspopup="dialog"
                                 onClick={event => {
                                     formTrigger.current = event.currentTarget;
                                     setForm({ entry });
@@ -417,7 +530,7 @@ function Workspace({ usuario, exit, exiting, sessionError }: {
                                         });
                                     }
                                 }} id={'cancel-' + entry.id} />}
-                        </div>}</td>
+                        </div></td>
                     </tr>;
                 })}</DataTable>}
                 {detailEntry && <Modal title={'Situação de ' + detailEntry.descricao} trigger={detailTrigger.current}

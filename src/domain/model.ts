@@ -1,6 +1,12 @@
 export const kinds = ['servicos', 'despesas', 'recebimentos'] as const;
 export type Kind = typeof kinds[number];
 
+export const expenseCategories: readonly string[] = [
+    'Aluguel', 'Impostos', 'Insumos', 'Internet e telefone', 'Marketing',
+    'Material de escritório', 'Serviços bancários', 'Software', 'Terceirização',
+    'Transporte e entregas', 'Água e energia', 'Outras despesas'
+];
+
 export interface Entry {
     id: number;
     descricao: string;
@@ -16,7 +22,7 @@ export interface Entry {
     recorrenciaOrigem?: number;
 }
 
-export type Draft = Omit<Entry, 'id' | 'cancelado' | 'recorrenciaOrigem' | 'custoDireto'>;
+export type Draft = Omit<Entry, 'id' | 'cancelado' | 'recorrenciaOrigem' | 'custoDireto'> & { cancelado?: boolean };
 
 export function serviceTotal(service: Pick<Entry, 'valor' | 'custoMaterial'>) {
     return service.valor + (service.custoMaterial ?? 0);
